@@ -121,6 +121,28 @@
       pointer-events: none;
     }
     #toast.show { opacity: 1; }
+
+    .mermaid-rendered {
+      padding: 16px;
+      margin: 8px 0;
+      background: #fafbfc;
+      border: 1px solid #e1e4e8;
+      border-radius: 6px;
+      text-align: center;
+      user-select: none;
+    }
+    .mermaid-rendered svg { max-width: 100%; height: auto; }
+    .mermaid-error {
+      padding: 12px 16px;
+      margin: 8px 0;
+      background: #ffeef0;
+      border: 1px solid #f9c0c4;
+      border-radius: 6px;
+      color: #cb2431;
+      font-size: 13px;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
   </style>
 </head>
 <body>
@@ -152,13 +174,71 @@
 <div id="toast"></div>
 
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  if (window.mermaid) {
+    window.mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
+  }
+</script>
 <script>
   const token = location.pathname.split('/').pop();
   let sessionData = null;
   let editor = null;
   let currentFile = null;
   let saveTimer = null;
+  let mermaidObserver = null;
+  let mermaidRenderTimer = null;
+  let mermaidCounter = 0;
   const fileOriginals = {}; // filePath → raw content from GitHub
+
+  async function renderMermaidBlocks() {
+    if (!window.mermaid) return;
+    const wrap = document.getElementById('editor-wrap');
+    if (!wrap) return;
+
+    // Toast UI WYSIWYG renders fenced code blocks as <pre><code data-language="...">...
+    // Find any code block tagged as mermaid that we haven't processed yet.
+    const codeEls = wrap.querySelectorAll(
+      'code[data-language="mermaid"], code.language-mermaid, pre[data-language="mermaid"]'
+    );
+
+    for (const codeEl of codeEls) {
+      const container = codeEl.closest('pre') || codeEl;
+      if (!container || container.dataset.mermaidProcessed === 'true') continue;
+      const source = codeEl.textContent.trim();
+      if (!source) continue;
+
+      container.dataset.mermaidProcessed = 'true';
+      const rendered = document.createElement('div');
+      rendered.className = 'mermaid-rendered';
+      rendered.setAttribute('contenteditable', 'false');
+      container.parentNode.insertBefore(rendered, container.nextSibling);
+      container.style.display = 'none';
+
+      try {
+        const id = 'mermaid-svg-' + (++mermaidCounter);
+        const { svg } = await window.mermaid.render(id, source);
+        rendered.innerHTML = svg;
+      } catch (e) {
+        rendered.className = 'mermaid-error';
+        rendered.textContent = 'Mermaid render failed: ' + (e && e.message ? e.message : e);
+      }
+    }
+  }
+
+  function scheduleMermaidRender() {
+    clearTimeout(mermaidRenderTimer);
+    mermaidRenderTimer = setTimeout(renderMermaidBlocks, 80);
+  }
+
+  function startMermaidObserver() {
+    if (mermaidObserver) mermaidObserver.disconnect();
+    const wrap = document.getElementById('editor-wrap');
+    if (!wrap) return;
+    mermaidObserver = new MutationObserver(scheduleMermaidRender);
+    mermaidObserver.observe(wrap, { childList: true, subtree: true });
+    scheduleMermaidRender();
+  }
 
   function showToast(msg, duration = 2000) {
     const el = document.getElementById('toast');
@@ -252,6 +332,8 @@
         saveTimer = setTimeout(saveCurrentFile, 1500);
       });
     }
+
+    startMermaidObserver();
   }
 
   async function saveCurrentFile() {
