@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>md-collaborator admin</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f6f8fa; color: #24292e; padding: 32px 24px; }
+    h1 { font-size: 20px; margin-bottom: 24px; }
+
+    #auth-section { margin-bottom: 24px; display: flex; gap: 8px; align-items: center; }
+    #auth-section input { padding: 8px 12px; border: 1px solid #e1e4e8; border-radius: 6px; font-size: 14px; width: 280px; }
+    button {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: 1px solid #e1e4e8;
+      background: #fff;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button.primary { background: #2da44e; color: #fff; border-color: #2da44e; font-weight: 600; }
+    button.primary:hover { background: #2c974b; }
+    button.danger { color: #cb2431; border-color: #fdb8c0; }
+    button.danger:hover { background: #ffeef0; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #create-section {
+      background: #fff;
+      border: 1px solid #e1e4e8;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 24px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    #create-section label { font-size: 13px; color: #6a737d; display: block; margin-bottom: 4px; }
+    #pr-url-input { padding: 8px 12px; border: 1px solid #e1e4e8; border-radius: 6px; font-size: 14px; width: 420px; }
+
+    #link-result {
+      display: none;
+      margin-bottom: 24px;
+      background: #dcffe4;
+      border: 1px solid #34d058;
+      border-radius: 8px;
+      padding: 16px 20px;
+    }
+    #link-result p { font-size: 13px; color: #22863a; margin-bottom: 8px; font-weight: 600; }
+    #link-result a { font-size: 14px; word-break: break-all; color: #0366d6; }
+    #copy-btn { margin-top: 10px; }
+
+    #sessions-section { background: #fff; border: 1px solid #e1e4e8; border-radius: 8px; overflow: hidden; }
+    #sessions-section h2 { font-size: 14px; font-weight: 600; padding: 14px 20px; border-bottom: 1px solid #e1e4e8; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 10px 16px; background: #f6f8fa; border-bottom: 1px solid #e1e4e8; color: #6a737d; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+    td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge.active { background: #dbedff; color: #0366d6; }
+    .badge.approved { background: #dcffe4; color: #22863a; }
+    .badge.revoked { background: #f6f8fa; color: #6a737d; }
+    .link-cell a { color: #0366d6; word-break: break-all; font-size: 12px; }
+    #empty-row td { color: #6a737d; text-align: center; padding: 32px; }
+
+    #error-msg { color: #cb2431; font-size: 13px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+<h1>md-collaborator</h1>
+
+<div id="auth-section">
+  <div>
+    <label style="font-size:13px;color:#6a737d;display:block;margin-bottom:4px">Admin secret</label>
+    <input type="password" id="secret-input" placeholder="Enter admin secret" />
+  </div>
+  <button onclick="loadSessions()">Load sessions</button>
+</div>
+
+<div id="create-section">
+  <div style="flex:1">
+    <label for="pr-url-input">GitHub PR URL</label>
+    <input id="pr-url-input" type="url" placeholder="https://github.com/owner/repo/pull/42" />
+  </div>
+  <button class="primary" onclick="createSession()">Create review link</button>
+</div>
+<div id="error-msg"></div>
+
+<div id="link-result">
+  <p>Review link created — share this with your partner:</p>
+  <a id="link-anchor" href="#" target="_blank"></a>
+  <br />
+  <button id="copy-btn" onclick="copyLink()">Copy link</button>
+</div>
+
+<div id="sessions-section">
+  <h2>Review sessions</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>PR</th>
+        <th>Title</th>
+        <th>Edits</th>
+        <th>Status</th>
+        <th>Created</th>
+        <th>Review link</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="sessions-body">
+      <tr id="empty-row"><td colspan="7">No sessions yet. Enter your admin secret and load sessions, or create one.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  const baseUrl = location.origin;
+  let createdLink = '';
+
+  function secret() {
+    return document.getElementById('secret-input').value.trim();
+  }
+
+  function adminHeaders() {
+    return { 'Content-Type': 'application/json', 'x-admin-secret': secret() };
+  }
+
+  function setError(msg) {
+    document.getElementById('error-msg').textContent = msg;
+  }
+
+  function formatDate(ts) {
+    return new Date(ts).toLocaleString();
+  }
+
+  async function loadSessions() {
+    setError('');
+    const res = await fetch('/admin/sessions', { headers: adminHeaders() });
+    if (!res.ok) { setError('Unauthorized or server error.'); return; }
+    const sessions = await res.json();
+    renderSessions(sessions);
+  }
+
+  function renderSessions(sessions) {
+    const tbody = document.getElementById('sessions-body');
+    if (sessions.length === 0) {
+      tbody.innerHTML = '<tr id="empty-row"><td colspan="7">No sessions yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = sessions.map(s => {
+      const link = `${baseUrl}/review/${s.token || ''}`;
+      return `
+        <tr>
+          <td><strong>#${s.pr_number}</strong><br><small style="color:#6a737d">${s.owner}/${s.repo}</small></td>
+          <td>${escHtml(s.pr_title)}</td>
+          <td>${s.edits_count} file${s.edits_count !== 1 ? 's' : ''}</td>
+          <td><span class="badge ${s.status}">${s.status}</span></td>
+          <td style="white-space:nowrap;color:#6a737d;font-size:12px">${formatDate(s.created_at)}</td>
+          <td class="link-cell"><a href="/review/${s.token || ''}" target="_blank">/review/${(s.token || '').slice(0, 12)}…</a></td>
+          <td>
+            ${s.status === 'active'
+              ? `<button class="danger" onclick="revoke('${s.id}')">Revoke</button>`
+              : ''}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function createSession() {
+    setError('');
+    const prUrl = document.getElementById('pr-url-input').value.trim();
+    if (!prUrl) { setError('Enter a PR URL.'); return; }
+
+    const res = await fetch('/admin/sessions', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ pr_url: prUrl }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setError(data.error || 'Failed to create session.'); return; }
+
+    createdLink = data.review_link;
+    const anchor = document.getElementById('link-anchor');
+    anchor.href = createdLink;
+    anchor.textContent = createdLink;
+    document.getElementById('link-result').style.display = 'block';
+    document.getElementById('pr-url-input').value = '';
+    loadSessions();
+  }
+
+  async function revoke(id) {
+    if (!confirm('Revoke this review link? The partner will lose access.')) return;
+    const res = await fetch(`/admin/sessions/${id}/revoke`, {
+      method: 'POST',
+      headers: adminHeaders(),
+    });
+    if (!res.ok) { setError('Failed to revoke.'); return; }
+    loadSessions();
+  }
+
+  function copyLink() {
+    navigator.clipboard.writeText(createdLink).then(() => {
+      document.getElementById('copy-btn').textContent = 'Copied!';
+      setTimeout(() => document.getElementById('copy-btn').textContent = 'Copy link', 2000);
+    });
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Review</title>
+  <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f6f8fa; color: #24292e; }
+
+    #header {
+      background: #fff;
+      border-bottom: 1px solid #e1e4e8;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    #header-left { display: flex; flex-direction: column; gap: 2px; }
+    #pr-label { font-size: 12px; color: #6a737d; }
+    #pr-title { font-size: 16px; font-weight: 600; }
+    #approve-btn {
+      background: #2da44e;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #approve-btn:hover:not(:disabled) { background: #2c974b; }
+    #approve-btn:disabled { background: #94d3a2; cursor: not-allowed; }
+    #approve-btn.approved { background: #6a737d; }
+
+    #layout { display: flex; height: calc(100vh - 57px); }
+
+    #sidebar {
+      width: 260px;
+      min-width: 200px;
+      background: #fff;
+      border-right: 1px solid #e1e4e8;
+      overflow-y: auto;
+      padding: 12px 0;
+    }
+    #sidebar h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #6a737d; padding: 0 16px 8px; }
+    .file-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #24292e;
+      border-left: 3px solid transparent;
+      word-break: break-all;
+    }
+    .file-item:hover { background: #f6f8fa; }
+    .file-item.active { background: #f1f8ff; border-left-color: #0366d6; font-weight: 600; }
+    .file-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #e1e4e8; }
+    .file-item.edited .dot { background: #f9826c; }
+
+    #editor-area {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    #no-file {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #6a737d;
+      font-size: 15px;
+    }
+    #editor-wrap { flex: 1; overflow: hidden; }
+    #editor-wrap .toastui-editor-defaultUI { height: 100%; }
+
+    #status-banner {
+      display: none;
+      padding: 16px 24px;
+      font-size: 15px;
+      font-weight: 500;
+      text-align: center;
+    }
+    #status-banner.approved { background: #dcffe4; color: #22863a; display: block; }
+    #status-banner.revoked { background: #ffeef0; color: #cb2431; display: block; }
+
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #24292e;
+      color: #fff;
+      padding: 10px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<div id="header">
+  <div id="header-left">
+    <span id="pr-label">Loading…</span>
+    <span id="pr-title"></span>
+  </div>
+  <button id="approve-btn" disabled>Approve Changes</button>
+</div>
+
+<div id="status-banner"></div>
+
+<div id="layout">
+  <div id="sidebar">
+    <h3>Changed files</h3>
+    <div id="file-list"></div>
+  </div>
+  <div id="editor-area">
+    <div id="no-file">Select a file to review</div>
+    <div id="editor-wrap" style="display:none"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
+<script>
+  const token = location.pathname.split('/').pop();
+  let sessionData = null;
+  let editor = null;
+  let currentFile = null;
+  let saveTimer = null;
+  const fileOriginals = {}; // filePath → raw content from GitHub
+
+  function showToast(msg, duration = 2000) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), duration);
+  }
+
+  async function api(method, path, body) {
+    const res = await fetch(`/review/api/${token}${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  }
+
+  function renderFileList(files) {
+    const list = document.getElementById('file-list');
+    list.innerHTML = '';
+    files.forEach(f => {
+      const el = document.createElement('div');
+      el.className = 'file-item' + (f.edited ? ' edited' : '');
+      el.dataset.path = f.path;
+      el.innerHTML = `<span class="dot"></span><span>${f.path}</span>`;
+      el.addEventListener('click', () => openFile(f.path));
+      list.appendChild(el);
+    });
+  }
+
+  function setActiveFile(filePath) {
+    document.querySelectorAll('.file-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.path === filePath);
+    });
+  }
+
+  function markFileEdited(filePath) {
+    const el = document.querySelector(`.file-item[data-path="${CSS.escape(filePath)}"]`);
+    if (el) el.classList.add('edited');
+  }
+
+  async function openFile(filePath) {
+    if (currentFile === filePath) return;
+
+    // Save pending changes for previous file before switching
+    if (currentFile && editor) {
+      clearTimeout(saveTimer);
+      await saveCurrentFile();
+    }
+
+    currentFile = filePath;
+    setActiveFile(filePath);
+
+    const { content } = await api('GET', `/files/${encodeURIComponent(filePath)}`);
+    fileOriginals[filePath] = content;
+
+    document.getElementById('no-file').style.display = 'none';
+    const wrap = document.getElementById('editor-wrap');
+    wrap.style.display = 'flex';
+
+    const isApproved = sessionData?.status === 'approved';
+
+    if (editor) {
+      editor.destroy();
+    }
+
+    editor = new toastui.Editor({
+      el: wrap,
+      height: '100%',
+      initialEditType: 'wysiwyg',
+      previewStyle: 'vertical',
+      initialValue: content,
+      toolbarItems: isApproved ? [] : [
+        ['heading', 'bold', 'italic', 'strike'],
+        ['hr', 'quote'],
+        ['ul', 'ol', 'task'],
+        ['table', 'link'],
+      ],
+      usageStatistics: false,
+    });
+
+    if (isApproved) {
+      editor.getEditorElements().mdEditor.setAttribute('contenteditable', 'false');
+      editor.getEditorElements().wwEditor.setAttribute('contenteditable', 'false');
+    } else {
+      editor.on('change', () => {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(saveCurrentFile, 1500);
+      });
+    }
+  }
+
+  async function saveCurrentFile() {
+    if (!currentFile || !editor || sessionData?.status !== 'active') return;
+    const content = editor.getMarkdown();
+    const originalContent = fileOriginals[currentFile];
+    try {
+      await api('PUT', `/files/${encodeURIComponent(currentFile)}`, { content, originalContent });
+      markFileEdited(currentFile);
+    } catch (e) {
+      showToast('Save failed: ' + e.message, 3000);
+    }
+  }
+
+  async function approve() {
+    if (!confirm('Are you sure you want to approve all changes? You will not be able to edit afterwards.')) return;
+
+    // Save any pending changes first
+    clearTimeout(saveTimer);
+    await saveCurrentFile();
+
+    const btn = document.getElementById('approve-btn');
+    btn.disabled = true;
+    btn.textContent = 'Submitting…';
+
+    try {
+      await api('POST', '/approve');
+      sessionData.status = 'approved';
+      showApprovedState();
+      showToast('Changes approved and committed!', 3000);
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Approve Changes';
+      showToast('Error: ' + e.message, 4000);
+    }
+  }
+
+  function showApprovedState() {
+    const btn = document.getElementById('approve-btn');
+    btn.textContent = 'Approved';
+    btn.disabled = true;
+    btn.classList.add('approved');
+
+    const banner = document.getElementById('status-banner');
+    banner.textContent = 'Changes have been approved and committed to the pull request.';
+    banner.className = 'approved';
+
+    // Re-open current file as read-only
+    if (currentFile) {
+      const path = currentFile;
+      currentFile = null;
+      openFile(path);
+    }
+  }
+
+  async function init() {
+    try {
+      sessionData = await api('GET', '');
+    } catch (e) {
+      // Session is revoked or invalid — show the error from the server
+      document.getElementById('header').innerHTML = `<span style="color:#cb2431;font-weight:600">${e.message}</span>`;
+      document.getElementById('layout').style.display = 'none';
+      return;
+    }
+
+    document.getElementById('pr-label').textContent = `PR #${sessionData.pr_number} · ${sessionData.owner}/${sessionData.repo}`;
+    document.getElementById('pr-title').textContent = sessionData.pr_title;
+
+    renderFileList(sessionData.files);
+
+    if (sessionData.status === 'approved') {
+      showApprovedState();
+    } else {
+      const btn = document.getElementById('approve-btn');
+      btn.disabled = false;
+      btn.addEventListener('click', approve);
+    }
+
+    // Auto-open first file
+    if (sessionData.files.length > 0) {
+      openFile(sessionData.files[0].path);
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>
