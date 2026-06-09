@@ -121,6 +121,27 @@
       pointer-events: none;
     }
     #toast.show { opacity: 1; }
+
+    .mermaid-rendered {
+      padding: 16px;
+      margin: 0;
+      background: #fafbfc;
+      border: 1px solid #e1e4e8;
+      border-radius: 6px;
+      text-align: center;
+      user-select: none;
+    }
+    .mermaid-rendered svg { max-width: 100%; height: auto; }
+    .mermaid-rendered.error {
+      background: #ffeef0;
+      border-color: #f9c0c4;
+      color: #cb2431;
+      font-size: 13px;
+      font-family: monospace;
+      white-space: pre-wrap;
+      text-align: left;
+      padding: 12px 16px;
+    }
   </style>
 </head>
 <body>
@@ -152,13 +173,79 @@
 <div id="toast"></div>
 
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  if (window.mermaid) {
+    window.mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
+  }
+</script>
 <script>
   const token = location.pathname.split('/').pop();
   let sessionData = null;
   let editor = null;
   let currentFile = null;
   let saveTimer = null;
+  let mermaidCounter = 0;
   const fileOriginals = {}; // filePath → raw content from GitHub
+
+  async function renderMermaidInto(dom, source) {
+    if (!window.mermaid) { dom.textContent = 'Mermaid library not loaded.'; dom.classList.add('error'); return; }
+    if (!source.trim()) { dom.innerHTML = '<em style="color:#888">(empty mermaid block)</em>'; return; }
+    try {
+      const id = 'mermaid-svg-' + (++mermaidCounter);
+      const { svg } = await window.mermaid.render(id, source);
+      dom.classList.remove('error');
+      dom.innerHTML = svg;
+    } catch (e) {
+      dom.classList.add('error');
+      dom.textContent = 'Mermaid render failed: ' + (e && e.message ? e.message : e);
+    }
+  }
+
+  // ProseMirror NodeView for fenced code blocks. Mermaid blocks render as
+  // a non-editable SVG; other languages get a minimal code-block view so
+  // ProseMirror still manages their text. We need to provide our own view
+  // for every codeBlock because Toast UI's plugin nodeViews override the
+  // built-in CodeBlockView wholesale — there's no super-call to fall back to.
+  function codeBlockNodeView(node) {
+    if (node.attrs.language === 'mermaid') {
+      const dom = document.createElement('div');
+      dom.className = 'mermaid-rendered';
+      dom.setAttribute('data-language', 'mermaid');
+      dom.setAttribute('contenteditable', 'false');
+      dom.innerHTML = '<em style="color:#888">rendering…</em>';
+      let lastSource = node.textContent;
+      renderMermaidInto(dom, lastSource);
+      return {
+        dom,
+        // No contentDOM: ProseMirror still has the code text in its state
+        // (so getMarkdown() round-trips), it just doesn't render it.
+        stopEvent() { return true; },
+        ignoreMutation() { return true; },
+        update(updated) {
+          if (updated.type !== node.type) return false;
+          if (updated.attrs.language !== 'mermaid') return false;
+          const src = updated.textContent;
+          if (src !== lastSource) { lastSource = src; renderMermaidInto(dom, src); }
+          return true;
+        },
+      };
+    }
+    const language = node.attrs.language;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'toastui-editor-ww-code-block';
+    wrapper.setAttribute('data-language', language || 'text');
+    const pre = document.createElement('pre');
+    const code = document.createElement('code');
+    if (language) code.setAttribute('data-language', language);
+    pre.appendChild(code);
+    wrapper.appendChild(pre);
+    return { dom: wrapper, contentDOM: code };
+  }
+
+  function mermaidPlugin() {
+    return { wysiwygNodeViews: { codeBlock: codeBlockNodeView } };
+  }
 
   function showToast(msg, duration = 2000) {
     const el = document.getElementById('toast');
@@ -240,6 +327,8 @@
         ['table', 'link'],
       ],
       usageStatistics: false,
+      hideModeSwitch: true,
+      plugins: [mermaidPlugin],
     });
 
     if (isApproved) {
