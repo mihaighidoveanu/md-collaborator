@@ -78,7 +78,7 @@ async function commitChanges(owner, repo, branch, headSha, editedFiles) {
   // Create commit
   const { data: newCommit } = await octokit.git.createCommit({
     owner, repo,
-    message: 'docs(review): review with partner',
+    message: 'docs(review): import review from business',
     tree: newTree.sha,
     parents: [headSha],
   });
