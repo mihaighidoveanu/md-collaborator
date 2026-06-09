@@ -38,6 +38,21 @@
     #approve-btn:disabled { background: #94d3a2; cursor: not-allowed; }
     #approve-btn.approved { background: #6a737d; }
 
+    #header-actions { display: flex; gap: 8px; align-items: center; }
+    #save-btn {
+      background: #fff;
+      color: #24292e;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #save-btn:hover:not(:disabled) { background: #f6f8fa; }
+    #save-btn:disabled { color: #8c959f; cursor: not-allowed; }
+
     #layout { display: flex; height: calc(100vh - 57px); }
 
     #sidebar {
@@ -115,7 +130,10 @@
     <span id="pr-label">Loading…</span>
     <span id="pr-title"></span>
   </div>
-  <button id="approve-btn" disabled>Approve Changes</button>
+  <div id="header-actions">
+    <button id="save-btn" disabled>Save</button>
+    <button id="approve-btn" disabled>Approve Changes</button>
+  </div>
 </div>
 
 <div id="status-banner"></div>
@@ -228,6 +246,7 @@
       editor.getEditorElements().mdEditor.setAttribute('contenteditable', 'false');
       editor.getEditorElements().wwEditor.setAttribute('contenteditable', 'false');
     } else {
+      document.getElementById('save-btn').disabled = false;
       editor.on('change', () => {
         clearTimeout(saveTimer);
         saveTimer = setTimeout(saveCurrentFile, 1500);
@@ -244,6 +263,23 @@
       markFileEdited(currentFile);
     } catch (e) {
       showToast('Save failed: ' + e.message, 3000);
+      throw e;
+    }
+  }
+
+  async function manualSave() {
+    const btn = document.getElementById('save-btn');
+    clearTimeout(saveTimer);
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await saveCurrentFile();
+      showToast('Saved');
+    } catch (e) {
+      // toast already shown by saveCurrentFile
+    } finally {
+      btn.textContent = 'Save';
+      btn.disabled = sessionData?.status !== 'active' || !currentFile;
     }
   }
 
@@ -306,9 +342,10 @@
     if (sessionData.status === 'approved') {
       showApprovedState();
     } else {
-      const btn = document.getElementById('approve-btn');
-      btn.disabled = false;
-      btn.addEventListener('click', approve);
+      const approveBtn = document.getElementById('approve-btn');
+      approveBtn.disabled = false;
+      approveBtn.addEventListener('click', approve);
+      document.getElementById('save-btn').addEventListener('click', manualSave);
     }
 
     // Auto-open first file
