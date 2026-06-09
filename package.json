@@ -7,7 +7,7 @@
     "dev": "node --watch server/index.js"
   },
   "engines": {
-    "node": "20.x"
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@octokit/rest": "^21.0.2",
