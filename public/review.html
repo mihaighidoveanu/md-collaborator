@@ -142,6 +142,64 @@
       text-align: left;
       padding: 12px 16px;
     }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(27,31,35,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-box {
+      background: #fff;
+      border-radius: 8px;
+      padding: 24px;
+      max-width: 480px;
+      width: 90%;
+      box-shadow: 0 8px 24px rgba(27,31,35,0.2);
+    }
+    .modal-box h3 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+    .modal-box p { font-size: 14px; line-height: 1.5; margin-bottom: 12px; }
+    .modal-file-list {
+      list-style: none;
+      background: #f6f8fa;
+      border: 1px solid #e1e4e8;
+      border-radius: 6px;
+      max-height: 160px;
+      overflow-y: auto;
+      margin-bottom: 16px;
+    }
+    .modal-file-list li {
+      font-size: 13px;
+      font-family: monospace;
+      padding: 6px 12px;
+      border-bottom: 1px solid #e1e4e8;
+    }
+    .modal-file-list li:last-child { border-bottom: none; }
+    .modal-warning {
+      font-size: 13px;
+      background: #ffeef0;
+      border: 1px solid #f9c0c4;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 20px;
+      color: #24292e;
+    }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .modal-actions button {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid;
+    }
+    #modal-back-btn { background: #fff; color: #24292e; border-color: #d0d7de; }
+    #modal-back-btn:hover { background: #f6f8fa; }
+    #modal-approve-btn { background: #cf222e; color: #fff; border-color: #cf222e; }
+    #modal-approve-btn:hover { background: #a40e26; }
   </style>
 </head>
 <body>
@@ -171,6 +229,19 @@
 </div>
 
 <div id="toast"></div>
+
+<div id="incomplete-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3>Some files haven't been opened yet</h3>
+    <p>You haven't reviewed the following files:</p>
+    <ul class="modal-file-list" id="unvisited-list"></ul>
+    <p class="modal-warning"><strong>Once you approve, you will not be able to edit any files.</strong> Do you want to go back and review these files first?</p>
+    <div class="modal-actions">
+      <button id="modal-back-btn">Go Back and Review</button>
+      <button id="modal-approve-btn">Approve Anyway</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -272,7 +343,12 @@
       const el = document.createElement('div');
       el.className = 'file-item' + (f.edited ? ' edited' : '');
       el.dataset.path = f.path;
-      el.innerHTML = `<span class="dot"></span><span>${f.path}</span>`;
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      const name = document.createElement('span');
+      name.textContent = f.path;
+      el.appendChild(dot);
+      el.appendChild(name);
       el.addEventListener('click', () => openFile(f.path));
       list.appendChild(el);
     });
@@ -303,6 +379,9 @@
 
     const { content } = await api('GET', `/files/${encodeURIComponent(filePath)}`);
     fileOriginals[filePath] = content;
+
+    const fileEntry = (sessionData?.files || []).find(f => f.path === filePath);
+    if (fileEntry) fileEntry.visited = true;
 
     document.getElementById('no-file').style.display = 'none';
     const wrap = document.getElementById('editor-wrap');
@@ -372,8 +451,44 @@
     }
   }
 
+  function showIncompleteModal(unvisitedPaths) {
+    return new Promise(resolve => {
+      const modal = document.getElementById('incomplete-modal');
+      const list = document.getElementById('unvisited-list');
+      list.innerHTML = '';
+      unvisitedPaths.forEach(p => {
+        const li = document.createElement('li');
+        li.textContent = p;
+        list.appendChild(li);
+      });
+      modal.style.display = 'flex';
+
+      const backBtn = document.getElementById('modal-back-btn');
+      const approveBtn = document.getElementById('modal-approve-btn');
+
+      function cleanup(result) {
+        modal.style.display = 'none';
+        backBtn.removeEventListener('click', onBack);
+        approveBtn.removeEventListener('click', onApprove);
+        resolve(result);
+      }
+
+      function onBack() { cleanup(false); }
+      function onApprove() { cleanup(true); }
+      backBtn.addEventListener('click', onBack);
+      approveBtn.addEventListener('click', onApprove);
+    });
+  }
+
   async function approve() {
-    if (!confirm('Are you sure you want to approve all changes? You will not be able to edit afterwards.')) return;
+    const unvisited = (sessionData?.files || []).filter(f => !f.visited).map(f => f.path);
+
+    if (unvisited.length > 0) {
+      const proceed = await showIncompleteModal(unvisited);
+      if (!proceed) return;
+    } else {
+      if (!confirm('Are you sure you want to approve all changes? You will not be able to edit afterwards.')) return;
+    }
 
     // Save any pending changes first
     clearTimeout(saveTimer);
