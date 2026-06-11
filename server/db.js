@@ -32,6 +32,14 @@ db.exec(`
     UNIQUE(session_id, file_path),
     FOREIGN KEY(session_id) REFERENCES sessions(id)
   );
+
+  CREATE TABLE IF NOT EXISTS file_visits (
+    session_id TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    visited_at INTEGER NOT NULL,
+    PRIMARY KEY (session_id, file_path),
+    FOREIGN KEY(session_id) REFERENCES sessions(id)
+  );
 `);
 
 // Migration: add original_content column to existing tables

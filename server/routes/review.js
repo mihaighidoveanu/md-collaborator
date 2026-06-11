@@ -67,10 +67,16 @@ router.get('/api/:token', requireActiveOrApproved, async (req, res) => {
         .all(session.id)
         .map(r => r.file_path)
     );
+    const visitedPaths = new Set(
+      db.prepare('SELECT file_path FROM file_visits WHERE session_id = ?')
+        .all(session.id)
+        .map(r => r.file_path)
+    );
     const files = prFiles.map(f => ({
       path: f.filename,
       status: f.status,
       edited: editedPaths.has(f.filename),
+      visited: visitedPaths.has(f.filename),
     }));
     res.json({
       pr_number: session.pr_number,
@@ -89,6 +95,14 @@ router.get('/api/:token', requireActiveOrApproved, async (req, res) => {
 router.get('/api/:token/files/*', requireActiveOrApproved, async (req, res) => {
   const { session } = req;
   const filePath = req.params[0];
+
+  if (session.status === 'active') {
+    db.prepare(`
+      INSERT INTO file_visits (session_id, file_path, visited_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(session_id, file_path) DO NOTHING
+    `).run(session.id, filePath, Date.now());
+  }
 
   const edit = db.prepare(
     'SELECT content FROM file_edits WHERE session_id = ? AND file_path = ?'
