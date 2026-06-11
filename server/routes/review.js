@@ -96,6 +96,25 @@ router.get('/api/:token/files/*', requireActiveOrApproved, async (req, res) => {
   const { session } = req;
   const filePath = req.params[0];
 
+  const edit = db.prepare(
+    'SELECT content FROM file_edits WHERE session_id = ? AND file_path = ?'
+  ).get(session.id, filePath);
+
+  let content, source;
+  if (edit) {
+    content = edit.content;
+    source = 'edit';
+  } else {
+    try {
+      const ghContent = await getFileContent(session.owner, session.repo, filePath, session.head_sha);
+      if (ghContent === null) return res.status(404).json({ error: 'File not found' });
+      content = ghContent;
+      source = 'github';
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   if (session.status === 'active') {
     db.prepare(`
       INSERT INTO file_visits (session_id, file_path, visited_at)
@@ -104,19 +123,7 @@ router.get('/api/:token/files/*', requireActiveOrApproved, async (req, res) => {
     `).run(session.id, filePath, Date.now());
   }
 
-  const edit = db.prepare(
-    'SELECT content FROM file_edits WHERE session_id = ? AND file_path = ?'
-  ).get(session.id, filePath);
-
-  if (edit) return res.json({ content: edit.content, source: 'edit' });
-
-  try {
-    const content = await getFileContent(session.owner, session.repo, filePath, session.head_sha);
-    if (content === null) return res.status(404).json({ error: 'File not found' });
-    res.json({ content, source: 'github' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ content, source });
 });
 
 // Autosave a file edit

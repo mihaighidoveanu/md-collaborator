@@ -343,7 +343,12 @@
       const el = document.createElement('div');
       el.className = 'file-item' + (f.edited ? ' edited' : '');
       el.dataset.path = f.path;
-      el.innerHTML = `<span class="dot"></span><span>${f.path}</span>`;
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      const name = document.createElement('span');
+      name.textContent = f.path;
+      el.appendChild(dot);
+      el.appendChild(name);
       el.addEventListener('click', () => openFile(f.path));
       list.appendChild(el);
     });
@@ -450,7 +455,12 @@
     return new Promise(resolve => {
       const modal = document.getElementById('incomplete-modal');
       const list = document.getElementById('unvisited-list');
-      list.innerHTML = unvisitedPaths.map(p => `<li>${p}</li>`).join('');
+      list.innerHTML = '';
+      unvisitedPaths.forEach(p => {
+        const li = document.createElement('li');
+        li.textContent = p;
+        list.appendChild(li);
+      });
       modal.style.display = 'flex';
 
       const backBtn = document.getElementById('modal-back-btn');
