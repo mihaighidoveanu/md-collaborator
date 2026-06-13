@@ -132,7 +132,7 @@ GitHub mock returns: open PR, head SHA `abc123`, two `.md` files (`README.md`, `
 | I-34 | Unknown token | 404 |
 | I-35 | File path in the PR (`docs/guide.md`) | 200; correct content |
 | I-36 | Deeply nested file path (`docs/api/v2/nested/guide.md`) | 200; wildcard route reconstructs full path correctly |
-| I-37 | File path not in this session's PR file list but valid in GitHub repo | 200; returns GitHub content (server does not filter GET by PR file list) |
+| I-37 | File path not in this session's PR file list but valid in GitHub repo | 404 (server must validate paths against PR file list) |
 | I-38 | File path that doesn't exist on GitHub at all | 404 |
 
 ### 2.7 File Visit Tracking
@@ -158,7 +158,7 @@ GitHub mock returns: open PR, head SHA `abc123`, two `.md` files (`README.md`, `
 | I-50 | Approved session | 403 |
 | I-51 | Revoked session | 403 |
 | I-52 | Unknown token | 404 |
-| I-53 | File path not in session's PR file list | 200; server does not validate PUT paths against PR file list; content is stored |
+| I-53 | File path not in session's PR file list | 404 (server must validate paths against PR file list) |
 | I-54 | Deeply nested path (`PUT /review/api/:token/files/a/b/c/d.md`) | 200; path stored and retrievable |
 
 ### 2.9 Approval (`POST /review/api/:token/approve`)
@@ -169,8 +169,8 @@ GitHub mock's `getCurrentHeadSha` returns the same SHA stored at session creatio
 |---|----------|----------|
 | I-55 | Happy path: active session, one dirty file, no conflict | 200 `{ ok: true }`; `commitChanges` called with that file; session `status` becomes `"approved"` |
 | I-56 | Happy path: active session, multiple dirty files, no conflict | 200; all dirty files bundled into single `commitChanges` call; session becomes `"approved"` |
-| I-57 | No dirty files at all | 400 "No changes to approve."; session remains `"active"`; `commitChanges` not called |
-| I-58 | Only visited-but-not-edited files (no dirty flag) | 400 "No changes to approve."; session remains `"active"` |
+| I-57 | No dirty files at all | 200; `commitChanges` not called; session becomes `"approved"` |
+| I-58 | Only visited-but-not-edited files (no dirty flag) | 200; `commitChanges` not called; session becomes `"approved"` |
 | I-59 | Dirty file with content identical to original | `commitChanges` is called (dirty flag is the trigger, not a content diff) |
 | I-60 | Branch conflict (mock `getCurrentHeadSha` returns different SHA than stored) | 409; session remains `"active"` |
 | I-61 | `commitChanges` throws (GitHub error mid-commit) | 5xx error; session remains `"active"` |
@@ -271,7 +271,7 @@ Full browser, real Express server, GitHub API intercepted (MSW or Playwright rou
 
 | # | Scenario | Expected |
 |---|----------|----------|
-| E-23 | Reviewer opens all files, makes no edits, clicks Approve | Error shown ("No changes to approve."); session remains active and editable |
+| E-23 | Reviewer opens all files, makes no edits, clicks Approve | Approval succeeds; no commit created; session enters read-only approved state |
 
 ---
 
