@@ -39,23 +39,35 @@ All cases test `lcsIndices()` + `reconstructMinimalContent()` together. "Origina
 | U-16 | Empty original, non-empty edited | Output identical to edited (all additions) |
 | U-17 | Non-empty original, empty edited | Output is empty |
 | U-18 | Only whitespace/blank-line changes | Whitespace changes captured; non-whitespace lines from original |
-| U-19 | File exactly 3000 lines — normal path | LCS path executes, correct output |
-| U-20 | File >3000 lines — fallback path | Falls back gracefully (no crash, output equals edited content) |
+| U-19 | File with repeated identical lines (e.g. `---` separator appears 5 times) | Correct LCS selected; no duplication or line-order corruption |
+| U-20 | Original uses CRLF (`\r\n`) line endings | Output uses `\r\n` as the line separator throughout; not mixed with `\n` |
+| U-21 | File exactly 3000 lines — normal path | LCS path executes, correct output |
+| U-22 | File >3000 lines — fallback path | Falls back gracefully (no crash, output equals edited content) |
 
-### 1.3 Session Middleware
+### 1.3 `getPRFiles` Filtering and Pagination
+
+Unit tests against a mocked Octokit. These cover code in `github.js` that integration tests never reach because they mock the whole module.
+
+| # | Scenario | Expected |
+|---|----------|----------|
+| U-23 | PR files include `.md`, `.js`, `.yml` | Only `.md` file returned |
+| U-24 | PR files include a `.md` with `status: "removed"` and one with `status: "modified"` | Only the `modified` file returned; `removed` excluded |
+| U-25 | Octokit paginator returns two pages of `.md` files (20 + 15) | All 35 files returned |
+
+### 1.4 Session Middleware
 
 Tests for `requireSession` and `requireActiveOrApproved` called with a seeded in-memory store (no HTTP).
 
 | # | Middleware | Token state | Expected |
 |---|-----------|------------|----------|
-| U-21 | `requireSession` | active | Calls `next()` |
-| U-22 | `requireSession` | approved | Returns 403 |
-| U-23 | `requireSession` | revoked | Returns 403 |
-| U-24 | `requireSession` | unknown | Returns 404 |
-| U-25 | `requireActiveOrApproved` | active | Calls `next()` |
-| U-26 | `requireActiveOrApproved` | approved | Calls `next()` |
-| U-27 | `requireActiveOrApproved` | revoked | Returns 403 |
-| U-28 | `requireActiveOrApproved` | unknown | Returns 404 |
+| U-26 | `requireSession` | active | Calls `next()` |
+| U-27 | `requireSession` | approved | Returns 403 |
+| U-28 | `requireSession` | revoked | Returns 403 |
+| U-29 | `requireSession` | unknown | Returns 404 |
+| U-30 | `requireActiveOrApproved` | active | Calls `next()` |
+| U-31 | `requireActiveOrApproved` | approved | Calls `next()` |
+| U-32 | `requireActiveOrApproved` | revoked | Returns 403 |
+| U-33 | `requireActiveOrApproved` | unknown | Returns 404 |
 
 ---
 
@@ -80,86 +92,89 @@ GitHub mock returns: open PR, head SHA `abc123`, two `.md` files (`README.md`, `
 
 | # | Scenario | Expected |
 |---|----------|----------|
-| I-05 | Valid PR URL, PR is open, has `.md` files | 201; session stored with `status: "active"`; token is 64-char hex string; `headSha` stored matches mock value |
+| I-05 | Valid PR URL, PR is open, has `.md` files | 200; session stored with `status: "active"`; token is 64-char hex string; `head_sha` stored matches mock value |
 | I-06 | Response body shape | Contains `session_id` (UUID) and `review_link` (string prefixed with `BASE_URL`, containing the token) |
-| I-07 | PR is closed/merged | 4xx error; no session created |
+| I-07 | PR is closed/merged | 400 "PR is not open"; no session created |
 | I-08 | PR exists but has zero `.md` files (all changes are `.js`, `.yml`, etc.) | 4xx error; no session created; error message indicates no markdown files |
 | I-09 | PR modifies `.md` files but some are deletions — deleted files excluded | Session created; file list contains only added/modified `.md` files, not deleted ones |
-| I-10 | GitHub returns 404 for the PR | 4xx error propagated; no session created |
-| I-11 | `getPRFiles` fails (GitHub error) | 4xx/5xx error; no session created |
-| I-12 | Invalid URL format (not parseable) | 400 before any GitHub call is made |
-| I-13 | Two `POST /admin/sessions` calls with the same PR URL | Both sessions created; both active; each has a distinct token |
+| I-10 | `pr_url` field missing from request body entirely | 400 "pr_url is required"; no GitHub call made |
+| I-11 | GitHub returns 404 for the PR | 400 error propagated; no session created |
+| I-12 | `getPRFiles` fails (GitHub error after PR fetch succeeds) | 4xx/5xx error; no session created |
+| I-13 | Invalid URL format (not parseable) | 400 before any GitHub call is made |
+| I-14 | Two `POST /admin/sessions` calls with the same PR URL | Both sessions created; both active; each has a distinct token |
 
 ### 2.3 Session Listing (`GET /admin/sessions`)
 
 | # | Scenario | Expected |
 |---|----------|----------|
-| I-14 | No sessions exist | 200; empty array |
-| I-15 | Multiple sessions with different statuses | All sessions returned; each includes `id`, `status`, `prNumber`, `editedFileCount`, `createdAt`, review link |
-| I-16 | Session with two dirty edits | `editedFileCount` is 2 |
-| I-17 | Session with no edits | `editedFileCount` is 0 |
+| I-15 | No sessions exist | 200; empty array |
+| I-16 | Multiple sessions with different statuses | All sessions returned; each object includes `id`, `token`, `owner`, `repo`, `pr_number`, `pr_title`, `status`, `created_at`, `edits_count` (all snake_case; `token` must be present so the admin panel can construct the review link) |
+| I-17 | Session with two dirty edits | `edits_count` is 2 |
+| I-18 | Session with no edits | `edits_count` is 0 |
 
 ### 2.4 Session Revocation (`POST /admin/sessions/:id/revoke`)
 
 | # | Scenario | Expected |
 |---|----------|----------|
-| I-18 | Revoke active session | 200; session `status` becomes `"revoked"` |
-| I-19 | Revoke already-revoked session | 404 "Session not found or already inactive" (WHERE clause requires `status='active'`; no match) |
-| I-20 | Revoke approved session | 404 "Session not found or already inactive" (same reason) |
-| I-21 | Non-existent session ID | 404 |
-| I-22 | Use session token (not id) in the URL | 404 (token ≠ id; wrong identifier type) |
+| I-19 | Revoke active session | 200; session `status` becomes `"revoked"` |
+| I-20 | Revoke already-revoked session | 404 "Session not found or already inactive" (WHERE clause requires `status='active'`; no match) |
+| I-21 | Revoke approved session | 404 "Session not found or already inactive" (same reason) |
+| I-22 | Non-existent session ID | 404 |
+| I-23 | Use session token (not id) in the URL | 404 (token ≠ id; wrong identifier type) |
 
 ### 2.5 Review Session Metadata (`GET /review/api/:token`)
 
 | # | Scenario | Expected |
 |---|----------|----------|
-| I-23 | Active session | 200; `status: "active"`; file list with all `.md` files from PR; all `visited: false`, `edited: false` initially |
-| I-24 | Approved session | 200; `status: "approved"`; file list returned |
-| I-25 | Revoked session | 403 |
-| I-26 | Unknown token | 404 |
-| I-27 | After one file is visited | That file has `visited: true`; others still `false` |
-| I-28 | After one file is edited | That file has `edited: true`; others still `false` |
+| I-24 | Active session | 200; `status: "active"`; file list with all `.md` files from PR; all `visited: false`, `edited: false` initially |
+| I-25 | Approved session | 200; `status: "approved"`; file list returned |
+| I-26 | Revoked session | 403 |
+| I-27 | Unknown token | 404 |
+| I-28 | After one file is visited | That file has `visited: true`; others still `false` |
+| I-29 | After one file is edited | That file has `edited: true`; others still `false` |
+| I-30 | `getPRFiles` throws during metadata fetch (GitHub error) | 500; session state unchanged |
 
 ### 2.6 File Content Retrieval (`GET /review/api/:token/files/*`)
 
 | # | Scenario | Expected |
 |---|----------|----------|
-| I-29 | First fetch of a file (no prior edit) | 200; returns original content from GitHub mock |
-| I-30 | Fetch after a `PUT` edit | 200; returns edited content from DB, not GitHub |
-| I-31 | Active session | 200 |
-| I-32 | Approved session | 200 (read-only access still works) |
-| I-33 | Revoked session | 403 |
-| I-34 | Unknown token | 404 |
-| I-35 | File path in the PR (`docs/guide.md`) | 200; correct content |
-| I-36 | Deeply nested file path (`docs/api/v2/nested/guide.md`) | 200; wildcard route reconstructs full path correctly |
-| I-37 | File path not in this session's PR file list but valid in GitHub repo | 404 (server must validate paths against PR file list) |
-| I-38 | File path that doesn't exist on GitHub at all | 404 |
+| I-31 | First fetch of a file (no prior edit) | 200; `{ content, source: "github" }` |
+| I-32 | Fetch after a `PUT` edit | 200; `{ content: <edited>, source: "edit" }` (DB value, not GitHub) |
+| I-33 | Active session | 200 |
+| I-34 | Approved session | 200 (read-only access still works) |
+| I-35 | Revoked session | 403 |
+| I-36 | Unknown token | 404 |
+| I-37 | File path in the PR (`docs/guide.md`) | 200; correct content |
+| I-38 | Deeply nested file path (`docs/api/v2/nested/guide.md`) | 200; wildcard route reconstructs full path correctly |
+| I-39 | File path not in this session's PR file list but valid in GitHub repo | 404 (server must validate paths against PR file list) |
+| I-40 | File path that doesn't exist on GitHub at all (`getFileContent` returns null) | 404 |
+| I-41 | GitHub returns a non-404 error when fetching file content | 500 |
 
 ### 2.7 File Visit Tracking
 
 | # | Scenario | Expected |
 |---|----------|----------|
-| I-39 | `GET /review/api/:token/files/foo.md` on active session, first time | `foo.md` marked visited in DB |
-| I-40 | `GET /review/api/:token` after visit | `foo.md` has `visited: true` in file list |
-| I-41 | Same file fetched twice on active session | Only one visit record in DB (no duplicate; ON CONFLICT DO NOTHING) |
-| I-42 | Fetching a file on approved session | Visit record is NOT created (visit tracking is active-session only) |
+| I-42 | `GET /review/api/:token/files/foo.md` on active session, first time | `foo.md` marked visited in DB |
+| I-43 | `GET /review/api/:token` after visit | `foo.md` has `visited: true` in file list |
+| I-44 | Same file fetched twice on active session | Only one visit record in DB (no duplicate; ON CONFLICT DO NOTHING) |
+| I-45 | Fetching a file on approved session | Visit record is NOT created (visit tracking is active-session only) |
 
 ### 2.8 File Edit / Auto-save (`PUT /review/api/:token/files/*`)
 
 | # | Scenario | Expected |
 |---|----------|----------|
-| I-43 | Active session, valid file, new content with `originalContent` in body | 200; `content` stored; `original_content` set from request body; `dirty: true` |
-| I-44 | Second `PUT` to same file with different `originalContent` | Content updated; `original_content` unchanged (first-seen value preserved by COALESCE) |
-| I-45 | `PUT` without `originalContent` field in body (first save) | 200; `original_content` stored as null; during approval, LCS is skipped and raw saved content is committed |
-| I-46 | `PUT` with content identical to original | 200; stored; `dirty: true`; file will be committed on approval (confirmed correct) |
-| I-47 | `PUT` empty string as content | 200; empty content stored; `dirty: true` |
-| I-48 | `PUT` with no `content` field in body | 400 "content is required" |
-| I-49 | `GET` after `PUT` | Returns saved content, not original |
-| I-50 | Approved session | 403 |
-| I-51 | Revoked session | 403 |
-| I-52 | Unknown token | 404 |
-| I-53 | File path not in session's PR file list | 404 (server must validate paths against PR file list) |
-| I-54 | Deeply nested path (`PUT /review/api/:token/files/a/b/c/d.md`) | 200; path stored and retrievable |
+| I-46 | Active session, valid PR file, content + `originalContent` in body | 200; `content` stored; `original_content` set from request body; `dirty: true` |
+| I-47 | Second `PUT` to same file with different `originalContent` | Content updated; `original_content` unchanged (first-seen value preserved by COALESCE) |
+| I-48 | `PUT` without `originalContent` field in body (first save) | 200; `original_content` stored as null; during approval LCS is skipped and raw saved content is committed |
+| I-49 | `PUT` with content identical to original | 200; stored; `dirty: true`; file will be committed on approval |
+| I-50 | `PUT` empty string as content | 200; empty content stored; `dirty: true` |
+| I-51 | `PUT` with no `content` field in body | 400 "content is required" |
+| I-52 | `GET` after `PUT` | Returns saved content, not original |
+| I-53 | Approved session | 403 |
+| I-54 | Revoked session | 403 |
+| I-55 | Unknown token | 404 |
+| I-56 | File path not in session's PR file list | 404 (server must validate paths against PR file list) |
+| I-57 | Deeply nested path (`PUT /review/api/:token/files/a/b/c/d.md`) | 200; path stored and retrievable |
 
 ### 2.9 Approval (`POST /review/api/:token/approve`)
 
@@ -167,37 +182,38 @@ GitHub mock's `getCurrentHeadSha` returns the same SHA stored at session creatio
 
 | # | Scenario | Expected |
 |---|----------|----------|
-| I-55 | Happy path: active session, one dirty file, no conflict | 200 `{ ok: true }`; `commitChanges` called with that file; session `status` becomes `"approved"` |
-| I-56 | Happy path: active session, multiple dirty files, no conflict | 200; all dirty files bundled into single `commitChanges` call; session becomes `"approved"` |
-| I-57 | No dirty files at all | 200; `commitChanges` not called; session becomes `"approved"` |
-| I-58 | Only visited-but-not-edited files (no dirty flag) | 200; `commitChanges` not called; session becomes `"approved"` |
-| I-59 | Dirty file with content identical to original | `commitChanges` is called (dirty flag is the trigger, not a content diff) |
-| I-60 | Branch conflict (mock `getCurrentHeadSha` returns different SHA than stored) | 409; session remains `"active"` |
-| I-61 | `commitChanges` throws (GitHub error mid-commit) | 5xx error; session remains `"active"` |
-| I-62 | `getCurrentHeadSha` throws (GitHub error before commit) | 5xx error; session remains `"active"` |
-| I-63 | Two simultaneous `POST /approve` requests on same token | First succeeds (200, session approved); second returns 403 |
-| I-64 | `POST /approve` on already-approved session | 403 |
-| I-65 | `POST /approve` on revoked session | 403 |
-| I-66 | After approval, `PUT /review/api/:token/files/*` | 403 |
-| I-67 | Committed content uses LCS reconstruction | Content passed to `commitChanges` matches `reconstructMinimalContent(original_content, content)` for each dirty file; null `original_content` → raw `content` passed through |
+| I-58 | Happy path: active session, one dirty file, no conflict | 200 `{ ok: true }`; `commitChanges` called with that file and the stored `head_sha`; session `status` becomes `"approved"` |
+| I-59 | Multiple dirty files, no conflict | 200; all dirty files bundled into a single `commitChanges` call; session becomes `"approved"` |
+| I-60 | No dirty files at all | 200; `commitChanges` not called; session becomes `"approved"` |
+| I-61 | Only visited-but-not-edited files (no dirty flag) | 200; `commitChanges` not called; session becomes `"approved"` |
+| I-62 | Dirty file with content identical to original | `commitChanges` is called (dirty flag is the trigger, not a content diff) |
+| I-63 | Branch conflict (mock `getCurrentHeadSha` returns different SHA than stored) | 409; session remains `"active"` |
+| I-64 | `commitChanges` throws (GitHub error mid-commit) | 5xx error; session remains `"active"` |
+| I-65 | `getCurrentHeadSha` throws (GitHub error before commit) | 5xx error; session remains `"active"` |
+| I-66 | Two simultaneous `POST /approve` requests on same token | First succeeds (200, session approved); second returns 403 |
+| I-67 | `POST /approve` on already-approved session | 403 |
+| I-68 | `POST /approve` on revoked session | 403 |
+| I-69 | After approval, `PUT /review/api/:token/files/*` | 403 |
+| I-70 | Committed content uses LCS reconstruction | Content passed to `commitChanges` matches `reconstructMinimalContent(original_content, content)` for each dirty file; null `original_content` → raw `content` passed through |
 
 ### 2.10 Review HTML Route (`GET /review/:token`)
 
-This route performs a DB lookup and has real branching — it does not just blindly serve HTML.
+This route performs a DB lookup and has real branching — it does not blindly serve HTML for all tokens.
 
 | # | Scenario | Expected |
 |---|----------|----------|
-| I-68 | Valid active token | 200; `Content-Type: text/html`; review.html served |
-| I-69 | Valid approved token | 200; review.html served (JS renders read-only state) |
-| I-70 | Valid revoked token | 200; review.html served (JS renders error state via API call) |
-| I-71 | Unknown token | 404 text response ("Link not found."); no HTML |
+| I-71 | Valid active token | 200; `Content-Type: text/html`; review.html served |
+| I-72 | Valid approved token | 200; review.html served (JS renders read-only state) |
+| I-73 | Valid revoked token | 200; review.html served (JS renders error state via API call) |
+| I-74 | Unknown token | 404 text response ("Link not found."); no HTML |
 
 ### 2.11 GitHub Pagination
 
+Covered by U-25 at the unit level (`getPRFiles` directly). These integration tests confirm the session creation route passes pagination results through correctly.
+
 | # | Scenario | Expected |
 |---|----------|----------|
-| I-72 | PR with 35 `.md` files (mock returns two pages of results) | Session file list contains all 35 files |
-| I-73 | PR with exactly 30 `.md` files (one full page) | Session file list contains all 30 files (no premature stop) |
+| I-75 | PR with 35 `.md` files (mock returns two pages of results) | Session created; session file list via `GET /review/api/:token` contains all 35 files |
 
 ---
 
@@ -279,21 +295,23 @@ Full browser, real Express server, GitHub API intercepted (MSW or Playwright rou
 
 | Fixture | Used by |
 |---------|---------|
-| Valid GitHub PR response: open, 2 `.md` files, head SHA `abc123` | All integration and E2E tests |
+| Valid GitHub PR response: open, 2 `.md` files, head SHA `abc123` | I-05–I-14 and all E2E tests |
 | GitHub PR response: closed/merged | I-07 |
 | GitHub PR response: open, zero `.md` files | I-08, E-03 |
-| GitHub PR response: open, `.md` files where some have `status: "removed"` | I-09 |
-| GitHub PR response: 35 `.md` files across two pages | I-72, I-73 |
-| File content: short markdown string (original) | I-29 through I-54, LCS unit tests |
-| File content: edited variant of the above | I-44, I-67, LCS unit tests |
-| File content: identical to original (no changes) | U-11, I-46, I-59 |
-| File content: empty string | U-16–U-17, I-47 |
+| GitHub PR response: open, `.md` files where some have `status: "removed"` | I-09, U-24 |
+| GitHub PR response: 35 `.md` files across two pages | U-25, I-75 |
+| File content: short markdown string (original) | I-31–I-57, LCS unit tests |
+| File content: edited variant of the above | I-47, I-70, LCS unit tests |
+| File content: identical to original (no changes) | U-11, I-49, I-62 |
+| File content: empty string | U-16–U-17, I-50 |
 | File content: whitespace-only changes | U-18 |
-| File content: 3001-line markdown document | U-19–U-20 |
+| File content: file with repeated identical lines | U-19 |
+| File content: CRLF line endings | U-20 |
+| File content: 3001-line markdown document | U-21–U-22 |
 | Pre-seeded sessions in each state (active/approved/revoked) | Middleware unit tests, state-machine integration tests |
-| PR with deeply nested `.md` file path `docs/api/v2/nested/guide.md` | I-36, I-54 |
-| PUT request body with `originalContent` field | I-43 |
-| PUT request body without `originalContent` field | I-45, I-67 |
+| PR with deeply nested `.md` file path `docs/api/v2/nested/guide.md` | I-38, I-57 |
+| PUT request body with `originalContent` field | I-46 |
+| PUT request body without `originalContent` field | I-48, I-70 |
 
 ---
 
@@ -302,37 +320,44 @@ Full browser, real Express server, GitHub API intercepted (MSW or Playwright rou
 | Feature | Unit | Integration | E2E |
 |---------|------|-------------|-----|
 | URL parsing (all formats + errors) | U-01–U-10 | — | — |
-| LCS reconstruction | U-11–U-20 | I-67 | — |
-| LCS fallback when originalContent is null | — | I-45, I-67 | — |
-| Session middleware | U-21–U-28 | — | — |
+| LCS reconstruction | U-11–U-18 | I-70 | — |
+| LCS: duplicate lines | U-19 | — | — |
+| LCS: CRLF line endings | U-20 | — | — |
+| LCS: size fallback | U-21–U-22 | — | — |
+| LCS: null originalContent fallback | — | I-48, I-70 | — |
+| `getPRFiles` filtering and pagination | U-23–U-25 | — | — |
+| Session middleware | U-26–U-33 | — | — |
 | Admin auth | — | I-01–I-04 | E-02 |
 | ADMIN_SECRET not set | — | I-04 | — |
 | Session creation (happy path) | — | I-05–I-06 | E-01 |
 | Session creation (no .md files) | — | I-08 | E-03 |
 | Session creation (deleted files excluded) | — | I-09 | — |
-| Session creation (error paths) | — | I-07, I-10–I-12 | — |
-| Multiple sessions same PR | — | I-13 | — |
-| Session listing | — | I-14–I-17 | E-01 |
-| Session revocation | — | I-18–I-22 | E-04–E-05 |
-| Review HTML route | — | I-68–I-71 | — |
-| Review metadata | — | I-23–I-28 | E-07 |
-| File content (original vs edited) | — | I-29–I-38 | E-08, E-15 |
-| Deeply nested file paths | — | I-36, I-54 | — |
-| Non-PR file GET (no server-side filtering) | — | I-37 | — |
-| Non-existent file GET | — | I-38 | — |
-| Visit tracking (active sessions only) | — | I-39–I-42 | E-08, E-11 |
-| Auto-save (with/without originalContent) | — | I-43–I-54 | E-09 |
-| Missing content field in PUT | — | I-48 | — |
-| Non-PR file PUT (no server-side filtering) | — | I-53 | — |
-| Approval (one dirty file) | — | I-55 | E-12–E-14 |
-| Approval (multiple dirty files, single commit) | — | I-56 | — |
-| Approval (no dirty files → 400) | — | I-57, I-58 | E-23 |
-| Approval (identical content still committed) | — | I-59 | — |
-| Conflict detection | — | I-60 | E-18 |
-| GitHub failure during approval | — | I-61–I-62 | — |
-| Concurrent approval requests | — | I-63 | — |
-| Post-approval state (read-only) | — | I-64–I-67 | E-16–E-17 |
-| GitHub pagination | — | I-72–I-73 | — |
+| Session creation (missing pr_url field) | — | I-10 | — |
+| Session creation (error paths) | — | I-07, I-11–I-13 | — |
+| Multiple sessions same PR | — | I-14 | — |
+| Session listing (incl. token field) | — | I-15–I-18 | E-01 |
+| Session revocation | — | I-19–I-23 | E-04–E-05 |
+| Review metadata | — | I-24–I-30 | E-07 |
+| getPRFiles failure in metadata route | — | I-30 | — |
+| File content (original vs edited, source field) | — | I-31–I-41 | E-08, E-15 |
+| Deeply nested file paths | — | I-38, I-57 | — |
+| Non-PR file GET | — | I-39 | — |
+| Non-existent file GET | — | I-40 | — |
+| GitHub non-404 error in file fetch | — | I-41 | — |
+| Visit tracking (active sessions only) | — | I-42–I-45 | E-08, E-11 |
+| Auto-save (with/without originalContent) | — | I-46–I-57 | E-09 |
+| Missing content field in PUT | — | I-51 | — |
+| Non-PR file PUT | — | I-56 | — |
+| Approval (one dirty file) | — | I-58 | E-12–E-14 |
+| Approval (multiple dirty files, single commit) | — | I-59 | — |
+| Approval (no dirty files) | — | I-60, I-61 | E-23 |
+| Approval (identical content still committed) | — | I-62 | — |
+| Conflict detection | — | I-63 | E-18 |
+| GitHub failure during approval | — | I-64–I-65 | — |
+| Concurrent approval requests | — | I-66 | — |
+| Post-approval state (read-only) | — | I-67–I-70 | E-16–E-17 |
+| Review HTML route branching | — | I-71–I-74 | — |
+| GitHub pagination (end-to-end through session creation) | — | I-75 | — |
 | Mid-session revocation | — | — | E-19–E-20 |
 | Mermaid rendering | — | — | E-21–E-22 |
 | Full end-to-end flow | — | — | E-06–E-14 |
