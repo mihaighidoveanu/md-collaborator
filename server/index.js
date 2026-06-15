@@ -1,13 +1,10 @@
 require('dotenv').config();
-const express = require('express');
-const path = require('path');
+const createApp = require('./app');
+const createDb = require('./db');
+const github = require('./github');
 
-const app = express();
-app.use(express.json());
-app.use(express.static(path.join(__dirname, '../public')));
-
-app.use('/admin', require('./routes/admin'));
-app.use('/review', require('./routes/review'));
+const db = createDb(process.env.DB_PATH || './data/sessions.db');
+const app = createApp({ db, github });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
