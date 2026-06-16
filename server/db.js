@@ -2,12 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const dbPath = process.env.DB_PATH || './data/sessions.db';
-fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-const db = new Database(dbPath);
-
-db.exec(`
+const SCHEMA = `
   CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     token TEXT UNIQUE NOT NULL,
@@ -40,9 +35,19 @@ db.exec(`
     PRIMARY KEY (session_id, file_path),
     FOREIGN KEY(session_id) REFERENCES sessions(id)
   );
-`);
+`;
 
-// Migration: add original_content column to existing tables
-try { db.exec('ALTER TABLE file_edits ADD COLUMN original_content TEXT'); } catch {}
+// Create a database connection with the schema applied. Pass ':memory:' for an
+// isolated in-memory database (used by tests); a file path is created on disk.
+function createDb(dbPath) {
+  if (dbPath !== ':memory:') {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  }
+  const db = new Database(dbPath);
+  db.exec(SCHEMA);
+  // Migration: add original_content column to existing tables.
+  try { db.exec('ALTER TABLE file_edits ADD COLUMN original_content TEXT'); } catch {}
+  return db;
+}
 
-module.exports = db;
+module.exports = createDb;

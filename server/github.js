@@ -1,5 +1,6 @@
 const { Octokit } = require('@octokit/rest');
 const { execSync } = require('child_process');
+const { selectReviewableFiles } = require('./lib/files');
 
 let _octokit = null;
 
@@ -35,7 +36,7 @@ async function getPRFiles(owner, repo, prNumber) {
   )) {
     files.push(...data);
   }
-  return files.filter(f => f.filename.endsWith('.md') && f.status !== 'removed');
+  return selectReviewableFiles(files);
 }
 
 async function getFileContent(owner, repo, filePath, ref) {
