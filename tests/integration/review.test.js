@@ -119,6 +119,46 @@ test('R8.1 opening a file marks it as reviewed', async () => {
   assert.equal(meta.json.files.find(f => f.path === 'docs/intro.md').visited, true);
 });
 
+// REQ-15 — Change awareness: the reviewer sees what moved upstream since last look.
+
+test('R15.1 a file whose upstream is unchanged opens as a plain view', async () => {
+  active = await setup();
+  const { ctx, session } = active;
+  const p = filePath('docs/intro.md');
+
+  const first = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
+  assert.equal(first.json.view, 'plain');
+
+  const second = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
+  assert.equal(second.json.view, 'plain', 'still plain when nothing moved');
+});
+
+test('R15.2 after the reviewer has seen a file, an upstream change opens a two-way diff', async () => {
+  active = await setup();
+  const { ctx, github, session } = active;
+  const p = filePath('docs/intro.md');
+
+  // First look establishes the "seen" watermark.
+  const first = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
+  assert.equal(first.json.view, 'plain');
+
+  // Upstream moves.
+  github.setContent('docs/intro.md', '# Intro\nhello, updated\n');
+
+  const changed = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
+  assert.equal(changed.json.view, 'two_way', 'a moved file opens as a diff');
+  assert.equal(changed.json.seen, '# Intro\nhello\n', 'the diff baseline is what was last seen');
+  assert.equal(changed.json.upstream, '# Intro\nhello, updated\n', 'the diff target is the new upstream');
+  assert.ok(
+    Array.isArray(changed.json.diff) && changed.json.diff.some(r => r.type === 'add' && /updated/.test(r.text)),
+    'the diff carries the new line'
+  );
+
+  // Re-opening with no further change settles back to plain (watermark advanced).
+  const settled = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
+  assert.equal(settled.json.view, 'plain', 'watermark advanced to the new upstream');
+});
+
 // REQ-9 — Submission opens a PR and closes the session.
 
 test('R9.1 submitting with edits opens one branch, one commit, and one PR; session is submitted', async () => {

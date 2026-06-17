@@ -20,6 +20,7 @@ function createFakeGithub(config = {}) {
   // headShas lets a test simulate the branch advancing after session creation.
   const headShas = config.headShas || {}; // key `${owner}/${repo}@${branch}` -> sha
   const existingBranches = new Set(config.existingBranches || []); // simulate name collisions
+  const contentOverrides = {}; // path -> content; test-only, simulates upstream change
 
   function key(owner, repo, number) { return `${owner}/${repo}#${number}`; }
   function pr(owner, repo, number) {
@@ -43,6 +44,11 @@ function createFakeGithub(config = {}) {
 
     async getFileContent(owner, repo, filePath /* , ref */) {
       calls.getFileContent.push({ owner, repo, filePath });
+      // A test-set override simulates upstream content moving after the session
+      // was created (the ref is otherwise ignored by this fake).
+      if (Object.prototype.hasOwnProperty.call(contentOverrides, filePath)) {
+        return contentOverrides[filePath];
+      }
       // contents are looked up across the configured PRs by path; tests keep paths unique enough.
       for (const k of Object.keys(prs)) {
         const c = prs[k].contents || {};
@@ -96,6 +102,9 @@ function createFakeGithub(config = {}) {
 
     // Test-only accessors
     calls,
+    // Test-only: simulate the upstream content of a file changing after the
+    // session was created.
+    setContent(filePath, content) { contentOverrides[filePath] = content; },
   };
 }
 

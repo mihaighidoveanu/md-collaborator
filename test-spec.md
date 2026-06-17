@@ -6,7 +6,7 @@
 
 **Suggested level** per test: **U** = pure-logic unit · **I** = API/integration · **E** = end-to-end browser. This is guidance for whoever implements them, not part of the assertion.
 
-**Total: 32 tests.**
+**Total: 34 tests.**
 
 > ⚠️ Two tests encode *intended* behavior that the current implementation does not yet satisfy (marked **[drives fix]**). They are expected to fail until the code is corrected.
 
@@ -153,6 +153,19 @@ The reviewer's commit must touch only the lines they actually changed; untouched
 
 ---
 
+## REQ-15 — The reviewer sees what changed since the last time they looked
+
+Each time a reviewer opens a file, the system remembers what they saw. If the
+file's upstream content has moved on a later visit, that file opens to a diff of
+what changed rather than dropping them straight into the editor.
+
+| # | Type | Lvl | Behavior |
+|---|------|-----|----------|
+| R15.1 | happy | I/E | A file whose upstream is unchanged opens directly (no diff) |
+| R15.2 | happy | I/E | After a file has been seen, an upstream change opens a two-way diff of what moved; once seen, it settles back to the direct view |
+
+---
+
 ## Traceability Summary
 
 | Requirement | Tests | Happy | Unhappy/Edge |
@@ -171,8 +184,9 @@ The reviewer's commit must touch only the lines they actually changed; untouched
 | R12 Read-only lock | R12.1–R12.2 | — | ✓ |
 | R13 Revoked link | R13.1 | — | ✓ |
 | R14 Diagrams | R14.1 | ✓ | — |
+| R15 Change awareness | R15.1–R15.2 | ✓ | — |
 
-Every requirement has at least one test; every requirement with a meaningful failure mode has a negative test; the highest-risk business logic (approval, commit integrity, conflict safety) carries its edge cases.
+Every requirement has at least one test; every requirement with a meaningful failure mode has a negative test; the highest-risk business logic (submission, commit integrity, conflict safety) carries its edge cases.
 
 ---
 

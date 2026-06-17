@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { reconstructMinimalContent } = require('../lib/minimalDiff');
+const { lineDiff } = require('../lib/diff');
 const { withRetry } = require('../lib/retry');
 const createSessionMiddleware = require('../middleware/session');
 
@@ -71,7 +72,9 @@ function createReviewRouter({ db, github }) {
     }
   });
 
-  // Get file content (edited version if available, otherwise from GitHub)
+  // Get file content, change-aware: surfaces what moved upstream since the
+  // reviewer last looked at this file (two-way diff). Three-way reconciliation
+  // for files the reviewer has also edited is layered on in a later phase.
   router.get('/api/:token/files/*', requireActiveOrSubmitted, async (req, res) => {
     const { session } = req;
     const filePath = req.params[0];
@@ -88,33 +91,67 @@ function createReviewRouter({ db, github }) {
     }
 
     const edit = db.prepare(
-      'SELECT content FROM file_edits WHERE session_id = ? AND file_path = ?'
+      'SELECT content, original_content FROM file_edits WHERE session_id = ? AND file_path = ?'
+    ).get(session.id, filePath);
+    const visit = db.prepare(
+      'SELECT seen_content FROM file_visits WHERE session_id = ? AND file_path = ?'
     ).get(session.id, filePath);
 
-    let content, source;
-    if (edit) {
-      content = edit.content;
-      source = 'edit';
-    } else {
-      try {
-        const ghContent = await github.getFileContent(session.owner, session.repo, filePath, session.head_sha);
-        if (ghContent === null) return res.status(404).json({ error: 'File not found' });
-        content = ghContent;
-        source = 'github';
-      } catch (err) {
-        return res.status(500).json({ error: err.message });
-      }
+    // Resolve the live upstream content. The head-SHA read is best-effort for
+    // display: a blip falls back to the session's original head rather than
+    // blocking the reviewer.
+    let liveHeadSha;
+    try {
+      liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, session.head_branch);
+    } catch {
+      liveHeadSha = session.head_sha;
     }
 
+    let upstream;
+    try {
+      upstream = await github.getFileContent(session.owner, session.repo, filePath, liveHeadSha);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    const mine = edit ? edit.content : null;
+    if (upstream === null && mine === null) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    let payload;
+    if (mine !== null) {
+      // The reviewer has edited this file. Three-way reconciliation against a
+      // drifted upstream arrives in a later phase; for now, show their edit.
+      payload = { view: 'plain', content: mine, source: 'edit' };
+    } else if (visit && typeof visit.seen_content === 'string' && visit.seen_content !== upstream) {
+      // Upstream moved since the reviewer last looked at this file.
+      payload = {
+        view: 'two_way',
+        content: upstream,
+        source: 'github',
+        seen: visit.seen_content,
+        upstream,
+        diff: lineDiff(visit.seen_content, upstream),
+      };
+    } else {
+      payload = { view: 'plain', content: upstream, source: 'github' };
+    }
+
+    // Advance the "seen" watermark to the current upstream so the next visit
+    // diffs against what is shown now. Only active sessions advance it.
     if (session.status === 'active') {
       db.prepare(`
-        INSERT INTO file_visits (session_id, file_path, visited_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(session_id, file_path) DO NOTHING
-      `).run(session.id, filePath, Date.now());
+        INSERT INTO file_visits (session_id, file_path, visited_at, seen_content, seen_sha)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(session_id, file_path) DO UPDATE SET
+          visited_at = excluded.visited_at,
+          seen_content = excluded.seen_content,
+          seen_sha = excluded.seen_sha
+      `).run(session.id, filePath, Date.now(), upstream, liveHeadSha);
     }
 
-    res.json({ content, source });
+    res.json(payload);
   });
 
   // Autosave a file edit

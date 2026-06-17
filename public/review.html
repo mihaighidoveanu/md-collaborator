@@ -97,6 +97,48 @@
     #editor-wrap { flex: 1; overflow: hidden; }
     #editor-wrap .toastui-editor-defaultUI { height: 100%; }
 
+    #diff-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    #diff-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 20px;
+      background: #fff8e6;
+      border-bottom: 1px solid #f2dca7;
+      font-size: 13px;
+      color: #6a5500;
+    }
+    #start-editing-btn {
+      background: #2da44e;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #start-editing-btn:hover { background: #2c974b; }
+    #diff-body {
+      flex: 1;
+      overflow: auto;
+      padding: 12px 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.5;
+      background: #fff;
+    }
+    .diff-row { display: flex; padding: 0 16px; white-space: pre-wrap; word-break: break-word; }
+    .diff-row .diff-gutter { width: 16px; flex-shrink: 0; color: #6a737d; user-select: none; }
+    .diff-row .diff-text { flex: 1; }
+    .diff-row.add { background: #e6ffed; }
+    .diff-row.add .diff-gutter { color: #22863a; }
+    .diff-row.del { background: #ffeef0; }
+    .diff-row.del .diff-gutter { color: #cb2431; }
+    .diff-row.eq { color: #57606a; }
+
     #status-banner {
       display: none;
       padding: 16px 24px;
@@ -224,6 +266,13 @@
   </div>
   <div id="editor-area">
     <div id="no-file">Select a file to review</div>
+    <div id="diff-panel" style="display:none">
+      <div id="diff-banner">
+        <span>This file changed since you last looked at it. Here's what's new:</span>
+        <button id="start-editing-btn">Start editing</button>
+      </div>
+      <div id="diff-body"></div>
+    </div>
     <div id="editor-wrap" style="display:none"></div>
   </div>
 </div>
@@ -365,33 +414,34 @@
     if (el) el.classList.add('edited');
   }
 
-  async function openFile(filePath) {
-    if (currentFile === filePath) return;
+  function renderDiffRows(rows) {
+    const body = document.getElementById('diff-body');
+    body.innerHTML = '';
+    const gutter = { eq: ' ', add: '+', del: '-' };
+    rows.forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'diff-row ' + r.type;
+      const g = document.createElement('span');
+      g.className = 'diff-gutter';
+      g.textContent = gutter[r.type] || ' ';
+      const t = document.createElement('span');
+      t.className = 'diff-text';
+      t.textContent = r.text;
+      row.appendChild(g);
+      row.appendChild(t);
+      body.appendChild(row);
+    });
+  }
 
-    // Save pending changes for previous file before switching
-    if (currentFile && editor) {
-      clearTimeout(saveTimer);
-      await saveCurrentFile();
-    }
-
-    currentFile = filePath;
-    setActiveFile(filePath);
-
-    const { content } = await api('GET', `/files/${encodeURIComponent(filePath)}`);
-    fileOriginals[filePath] = content;
-
-    const fileEntry = (sessionData?.files || []).find(f => f.path === filePath);
-    if (fileEntry) fileEntry.visited = true;
-
-    document.getElementById('no-file').style.display = 'none';
+  // Mount the WYSIWYG editor for the current file, loaded with `content` as the
+  // editing baseline. Hides the diff panel if it was showing.
+  function mountEditor(content) {
+    document.getElementById('diff-panel').style.display = 'none';
     const wrap = document.getElementById('editor-wrap');
     wrap.style.display = 'flex';
 
     const isSubmitted = sessionData?.status === 'submitted';
-
-    if (editor) {
-      editor.destroy();
-    }
+    if (editor) editor.destroy();
 
     editor = new toastui.Editor({
       el: wrap,
@@ -419,6 +469,52 @@
         clearTimeout(saveTimer);
         saveTimer = setTimeout(saveCurrentFile, 1500);
       });
+    }
+  }
+
+  // Show the read-first two-way diff of what moved upstream since last look.
+  // The editor mounts lazily when the reviewer chooses to start editing.
+  function showDiffPanel(filePath, data) {
+    if (editor) { editor.destroy(); editor = null; }
+    document.getElementById('editor-wrap').style.display = 'none';
+    document.getElementById('save-btn').disabled = true;
+    renderDiffRows(data.diff || []);
+    document.getElementById('diff-panel').style.display = 'flex';
+
+    const btn = document.getElementById('start-editing-btn');
+    btn.onclick = () => {
+      if (currentFile !== filePath) return;
+      mountEditor(data.upstream);
+    };
+  }
+
+  async function openFile(filePath) {
+    if (currentFile === filePath) return;
+
+    // Save pending changes for previous file before switching
+    if (currentFile && editor) {
+      clearTimeout(saveTimer);
+      await saveCurrentFile();
+    }
+
+    currentFile = filePath;
+    setActiveFile(filePath);
+
+    const data = await api('GET', `/files/${encodeURIComponent(filePath)}`);
+    fileOriginals[filePath] = data.content;
+
+    const fileEntry = (sessionData?.files || []).find(f => f.path === filePath);
+    if (fileEntry) fileEntry.visited = true;
+
+    document.getElementById('no-file').style.display = 'none';
+
+    const isSubmitted = sessionData?.status === 'submitted';
+    // A two-way diff opens by default when upstream moved since the last look —
+    // but never on a read-only submitted session, where editing is moot.
+    if (data.view === 'two_way' && !isSubmitted) {
+      showDiffPanel(filePath, data);
+    } else {
+      mountEditor(data.content);
     }
   }
 
