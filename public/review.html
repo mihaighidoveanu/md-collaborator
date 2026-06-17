@@ -339,9 +339,8 @@
       <div id="threeway-banner">
         <span>This file changed upstream while you had unsaved edits. Reconcile the differences:</span>
         <div class="threeway-actions">
-          <button id="keep-mine-btn">Keep mine</button>
-          <button id="take-upstream-btn">Take upstream</button>
-          <button id="edit-merged-btn" class="primary">Edit to merge</button>
+          <button id="keep-mine-btn" class="primary">Edit from mine</button>
+          <button id="take-upstream-btn">Edit from upstream</button>
         </div>
       </div>
       <div id="threeway-head">
@@ -593,9 +592,9 @@
   }
 
   // Show the three-way reconcile view (Original | Upstream | Your edits) for a
-  // file the reviewer edited and that also drifted upstream. Each action exits
-  // into the editor loaded with the chosen side; whatever they land on autosaves
-  // as usual, so they can hand-merge by editing.
+  // file the reviewer edited and that also drifted upstream. The reviewer picks
+  // a starting point; from there the editor is free, so they hand-merge by
+  // pulling in whatever they want from the other column they just compared.
   function showThreeWayPanel(filePath, data) {
     if (editor) { editor.destroy(); editor = null; }
     hidePanels();
@@ -611,7 +610,6 @@
     };
     wire('keep-mine-btn', data.mine);
     wire('take-upstream-btn', data.upstream);
-    wire('edit-merged-btn', data.mine);
   }
 
   async function openFile(filePath) {
