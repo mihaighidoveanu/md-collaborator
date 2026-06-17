@@ -115,13 +115,14 @@
     }
     #editor-area.reconcile #reference-panel.collapsed { width: auto; min-width: 0; }
     #reference-panel.collapsed #reference-label { display: none; }
-    .tw-conflict-note {
+    .tw-note {
       padding: 4px 12px;
       font-size: 12px;
-      color: #9a6700;
-      background: #fff8e6;
+      color: #22863a;
+      background: #e6ffed;
       border-bottom: 1px solid #f3f4f6;
     }
+    .tw-note.conflict { color: #9a6700; background: #fff8e6; }
     #reference-header {
       display: flex;
       align-items: center;
@@ -516,10 +517,22 @@
       row.appendChild(cell(r.base, false));
       row.appendChild(cell(r.mine, r.mineChanged));
       container.appendChild(row);
-      if (r.conflict) {
+      // Surface what the author changed upstream since the reviewer's last view —
+      // for every upstream change, not only conflicts — so additions aren't lost.
+      if (r.upstreamChanged) {
         const note = document.createElement('div');
-        note.className = 'tw-conflict-note';
-        note.textContent = '⚠ The author also changed this line to: ' + (r.upstream === null ? '(removed)' : r.upstream);
+        note.className = 'tw-note' + (r.conflict ? ' conflict' : '');
+        let msg;
+        if (r.conflict) {
+          msg = '⚠ You both changed this line. The author’s version: ' + (r.upstream === null ? '(removed)' : r.upstream);
+        } else if (r.base === null) {
+          msg = 'The author added since your last view: ' + r.upstream;
+        } else if (r.upstream === null) {
+          msg = 'The author removed this line since your last view.';
+        } else {
+          msg = 'The author changed this since your last view: ' + r.upstream;
+        }
+        note.textContent = msg;
         container.appendChild(note);
       }
     });
@@ -537,7 +550,7 @@
     if (data.view === 'three_way') {
       // Side-by-side reconcile: reference left, editor (upstream) right.
       area.classList.add('reconcile');
-      label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) in the editor, on top of the author’s version.';
+      label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) in the editor; the author’s changes since your last view are noted inline.';
       buildThreeWay(body, data.diff || []);
     } else {
       // Informational "what moved", stacked above the editor.

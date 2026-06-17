@@ -314,10 +314,11 @@ pane above the editor**, and editing always proceeds from `upstream`:
 - `three_way` → lay the reference pane **beside the editor** (reference left,
   editor right) for compare‑while‑editing. The reference is a **2‑column** view:
   **Original | Your edits** (the `mine`‑changed cells highlighted). The Upstream
-  column is dropped — the editor already shows upstream — but conflict awareness
-  is kept: rows both sides changed are flagged amber and the author's clashing
-  line is shown inline (`⚠ The author also changed this line to: …`). Mount the
-  editor on `upstream`. Editing **always continues from upstream** — the reviewer
+  column is dropped — the editor already shows upstream — but **what the author
+  changed since the reviewer's last view is annotated inline on every
+  upstream‑changed row** (added/changed/removed), in green, with conflicts (both
+  sides changed the same line) flagged amber. So upstream additions are never
+  lost even without a dedicated column. Mount the editor on `upstream`. Editing **always continues from upstream** — the reviewer
   can never drop the author's changes wholesale by taking their own stale‑based
   version. The reviewer re‑applies their changes (left column) into the editor by
   hand, and the result autosaves as usual. (Rationale: committing a mine‑based
