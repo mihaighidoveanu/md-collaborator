@@ -3,7 +3,7 @@
 // It is configured with in-memory fixtures and records the calls that have
 // side effects (commits), so tests can assert observable outcomes — what got
 // committed, how many commits — without any network access. The fake speaks
-// the same 5-method contract the real adapter exports, so swapping it in
+// the same contract the real adapter exports, so swapping it in
 // requires no change to the routes under test.
 //
 // Note: getPRFiles returns the *reviewable* set (already markdown, non-deleted),
@@ -13,9 +13,13 @@ const { selectReviewableFiles } = require('../../server/lib/files');
 
 function createFakeGithub(config = {}) {
   const prs = config.prs || {};        // key `${owner}/${repo}#${number}` -> { state, title, head:{ref,sha}, files, contents }
-  const calls = { getPR: [], getPRFiles: [], getFileContent: [], commitChanges: [], getCurrentHeadSha: [] };
+  const calls = {
+    getPR: [], getPRFiles: [], getFileContent: [], commitChanges: [], getCurrentHeadSha: [],
+    createBranch: [], createPullRequest: [],
+  };
   // headShas lets a test simulate the branch advancing after session creation.
   const headShas = config.headShas || {}; // key `${owner}/${repo}@${branch}` -> sha
+  const existingBranches = new Set(config.existingBranches || []); // simulate name collisions
 
   function key(owner, repo, number) { return `${owner}/${repo}#${number}`; }
   function pr(owner, repo, number) {
@@ -63,6 +67,27 @@ function createFakeGithub(config = {}) {
       const sha = 'commit-' + (calls.commitChanges.length + 1);
       calls.commitChanges.push({ owner, repo, branch, headSha, editedFiles, sha });
       return sha;
+    },
+
+    async createBranch(owner, repo, branchName, fromSha) {
+      if (config.submitShouldFail) throw new Error('GitHub branch creation failed');
+      let name = branchName;
+      let attempt = 1;
+      while (existingBranches.has(name) && attempt < 20) {
+        attempt += 1;
+        name = `${branchName}-${attempt}`;
+      }
+      existingBranches.add(name);
+      calls.createBranch.push({ owner, repo, branchName: name, fromSha });
+      return name;
+    },
+
+    async createPullRequest(owner, repo, head, base, title, body) {
+      if (config.submitShouldFail) throw new Error('GitHub PR creation failed');
+      const number = 1000 + calls.createPullRequest.length;
+      const html_url = `https://github.com/${owner}/${repo}/pull/${number}`;
+      calls.createPullRequest.push({ owner, repo, head, base, title, body, number, html_url });
+      return { number, html_url };
     },
 
     // Test-only accessors
