@@ -53,6 +53,10 @@ function createFakeGithub(config = {}) {
 
     async getCurrentHeadSha(owner, repo, branch) {
       calls.getCurrentHeadSha.push({ owner, repo, branch });
+      // Simulate a transient blip: throw on the first N calls, then recover.
+      if (config.headShaFailTimes && calls.getCurrentHeadSha.length <= config.headShaFailTimes) {
+        throw new Error('transient: could not resolve ref');
+      }
       const override = headShas[`${owner}/${repo}@${branch}`];
       if (override !== undefined) return override;
       // Default: branch unchanged — return the sha of whichever PR uses this branch.

@@ -5,7 +5,7 @@ const { createFakeGithub } = require('../helpers/fakeGithub');
 
 // Build a fake configured with one open PR plus a session row already pointing
 // at it, returning everything a review-flow test needs.
-async function setup({ files, contents, status = 'active', headShas, commitShouldFail, submitShouldFail } = {}) {
+async function setup({ files, contents, status = 'active', headShas, commitShouldFail, submitShouldFail, headShaFailTimes } = {}) {
   files = files || [
     { filename: 'docs/intro.md', status: 'modified' },
     { filename: 'README.md', status: 'added' },
@@ -18,6 +18,7 @@ async function setup({ files, contents, status = 'active', headShas, commitShoul
     headShas,
     commitShouldFail,
     submitShouldFail,
+    headShaFailTimes,
   });
   const ctx = await startTestServer({ github });
   const session = ctx.seedSession({ owner: 'acme', repo: 'docs', pr_number: 1, head_branch: 'feature', head_sha: 'sha-1', status });
@@ -146,7 +147,11 @@ test('R9.1 submitting with edits opens one branch, one commit, and one PR; sessi
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
   assert.equal(meta.json.status, 'submitted', 'session is locked as submitted');
-  assert.equal(meta.json.submitted_pr_number, pr.number, 'the PR is recorded on the session');
+
+  // The opened PR is persisted on the session row (survives reload).
+  const row = ctx.db.prepare('SELECT submitted_pr_number, submitted_branch FROM sessions WHERE id = ?').get(session.id);
+  assert.equal(row.submitted_pr_number, pr.number, 'the PR is recorded on the session');
+  assert.equal(row.submitted_branch, newBranch, 'the branch is recorded on the session');
 });
 
 test('R9.2 several edited files are delivered as one commit, not many', async () => {
@@ -223,6 +228,22 @@ test('R11.3 if opening the PR fails, the session stays open', async () => {
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
   assert.equal(meta.json.status, 'active', 'session is not left half-submitted');
+});
+
+test('R11.4 a transient blip resolving the live head is retried, and submission still succeeds', async () => {
+  active = await setup({ headShaFailTimes: 2 });
+  const { ctx, github, session } = active;
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+
+  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res.status, 200, 'submission recovers after the read blip clears');
+  assert.ok(github.calls.getCurrentHeadSha.length >= 3, 'the read was retried past the failures');
+  assert.equal(github.calls.createPullRequest.length, 1, 'the PR is opened once the read succeeds');
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.status, 'submitted', 'session closes as submitted');
 });
 
 // REQ-12 — A submitted session is read-only.

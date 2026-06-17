@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { reconstructMinimalContent } = require('../lib/minimalDiff');
+const { withRetry } = require('../lib/retry');
 const createSessionMiddleware = require('../middleware/session');
 
 // Compose the PR body so the reviewer's comments travel with the pull request.
@@ -62,10 +63,7 @@ function createReviewRouter({ db, github }) {
         pr_title: session.pr_title,
         owner: session.owner,
         repo: session.repo,
-        head_branch: session.head_branch,
         status: session.status,
-        submitted_pr_number: session.submitted_pr_number,
-        submitted_pr_url: session.submitted_pr_url,
         files,
       });
     } catch (err) {
@@ -161,12 +159,11 @@ function createReviewRouter({ db, github }) {
     try {
       // Commit off the live head so we never clobber work that landed since the
       // session was created — the three-way view already surfaced any drift.
-      let liveHeadSha;
-      try {
-        liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, session.head_branch);
-      } catch {
-        liveHeadSha = session.head_sha;
-      }
+      // A transient blip on this read is retried; if it stays down we fail the
+      // submit (session stays open) rather than risk committing off a stale base.
+      const liveHeadSha = await withRetry(
+        () => github.getCurrentHeadSha(session.owner, session.repo, session.head_branch)
+      );
 
       const branchName = `review/pr${session.pr_number}-${session.token.slice(0, 8)}`;
       const newBranch = await github.createBranch(session.owner, session.repo, branchName, liveHeadSha);

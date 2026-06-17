@@ -105,7 +105,6 @@
       text-align: center;
     }
     #status-banner.submitted { background: #dcffe4; color: #22863a; display: block; }
-    #status-banner.submitted a { color: #22863a; font-weight: 600; }
     #status-banner.revoked { background: #ffeef0; color: #cb2431; display: block; }
 
     #toast {
@@ -500,12 +499,10 @@
     btn.textContent = 'Submitting…';
 
     try {
-      const result = await api('POST', '/submit');
+      await api('POST', '/submit');
       sessionData.status = 'submitted';
-      sessionData.pr_number = result.pr_number;
-      sessionData.pr_url = result.pr_url;
       showSubmittedState();
-      showToast(result.submitted ? 'Pull request opened!' : 'Review closed.', 3000);
+      showToast('Submitted for review', 3000);
     } catch (e) {
       btn.disabled = false;
       btn.textContent = 'Submit for PR';
@@ -521,11 +518,7 @@
 
     const banner = document.getElementById('status-banner');
     banner.className = 'submitted';
-    if (sessionData?.pr_url && sessionData?.pr_number) {
-      banner.innerHTML = `Opened pull request <a href="${sessionData.pr_url}" target="_blank">#${sessionData.pr_number}</a> → ${sessionData.head_branch || 'the PR branch'}.`;
-    } else {
-      banner.textContent = 'Your review has been submitted.';
-    }
+    banner.textContent = 'Your changes have been submitted for review.';
 
     // Re-open current file as read-only
     if (currentFile) {
@@ -551,8 +544,6 @@
     renderFileList(sessionData.files);
 
     if (sessionData.status === 'submitted') {
-      sessionData.pr_number = sessionData.submitted_pr_number;
-      sessionData.pr_url = sessionData.submitted_pr_url;
       showSubmittedState();
     } else {
       const approveBtn = document.getElementById('approve-btn');
