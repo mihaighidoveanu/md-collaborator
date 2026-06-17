@@ -94,12 +94,34 @@
       color: #6a737d;
       font-size: 15px;
     }
-    #editor-wrap { flex: 1; min-height: 0; overflow: hidden; }
+    #editor-wrap { flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
     #editor-wrap .toastui-editor-defaultUI { height: 100%; }
 
-    /* Reference pane: shows what moved upstream, sitting above the editor so the
-       reviewer can re-apply their changes. Collapsible and height-bounded. */
+    /* Reference pane: shows what moved upstream so the reviewer can re-apply
+       their changes. Stacked above the editor for the informational two-way
+       diff; collapsible and height-bounded. */
     #reference-panel { flex-shrink: 0; display: flex; flex-direction: column; max-height: 45vh; border-bottom: 1px solid #e1e4e8; }
+
+    /* Three-way reconcile: lay the reference beside the editor (left), so the
+       reviewer reads their changes on the left and re-applies them on the right. */
+    #editor-area.reconcile { flex-direction: row; }
+    #editor-area.reconcile #reference-panel {
+      flex-direction: column;
+      max-height: none;
+      width: 42%;
+      min-width: 320px;
+      border-bottom: none;
+      border-right: 1px solid #e1e4e8;
+    }
+    #editor-area.reconcile #reference-panel.collapsed { width: auto; min-width: 0; }
+    #reference-panel.collapsed #reference-label { display: none; }
+    .tw-conflict-note {
+      padding: 4px 12px;
+      font-size: 12px;
+      color: #9a6700;
+      background: #fff8e6;
+      border-bottom: 1px solid #f3f4f6;
+    }
     #reference-header {
       display: flex;
       align-items: center;
@@ -125,6 +147,8 @@
     }
     #reference-toggle:hover { background: #f6f8fa; }
     #reference-body {
+      flex: 1;
+      min-height: 0;
       overflow: auto;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12.5px;
@@ -465,12 +489,15 @@
     });
   }
 
-  // Build the three-way table (Original | Upstream | Your edits) into a
-  // container element.
+  // Build the reconcile reference: two columns (Original | Your edits) the
+  // reviewer re-applies onto the upstream content shown in the editor. The
+  // Upstream column is dropped — the editor already shows it — but conflict
+  // awareness is kept: rows both sides changed are flagged, and the author's
+  // clashing line is shown inline so it isn't lost.
   function buildThreeWay(container, rows) {
     const head = document.createElement('div');
     head.id = 'threeway-head';
-    ['Original', 'Upstream (author)', 'Your edits (re-apply)'].forEach(label => {
+    ['Original', 'Your edits (re-apply)'].forEach(label => {
       const col = document.createElement('div');
       col.className = 'tw-col';
       col.textContent = label;
@@ -487,9 +514,14 @@
         return c;
       };
       row.appendChild(cell(r.base, false));
-      row.appendChild(cell(r.upstream, r.upstreamChanged));
       row.appendChild(cell(r.mine, r.mineChanged));
       container.appendChild(row);
+      if (r.conflict) {
+        const note = document.createElement('div');
+        note.className = 'tw-conflict-note';
+        note.textContent = '⚠ The author also changed this line to: ' + (r.upstream === null ? '(removed)' : r.upstream);
+        container.appendChild(note);
+      }
     });
   }
 
@@ -497,14 +529,19 @@
   // the three-way comparison the reviewer re-applies their edits from. The
   // editor still mounts on upstream — the pane is reference, not a gate.
   function showReference(data) {
+    const area = document.getElementById('editor-area');
     const panel = document.getElementById('reference-panel');
     const label = document.getElementById('reference-label');
     const body = document.getElementById('reference-body');
     body.innerHTML = '';
     if (data.view === 'three_way') {
-      label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) on top of the upstream version below.';
+      // Side-by-side reconcile: reference left, editor (upstream) right.
+      area.classList.add('reconcile');
+      label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) in the editor, on top of the author’s version.';
       buildThreeWay(body, data.diff || []);
     } else {
+      // Informational "what moved", stacked above the editor.
+      area.classList.remove('reconcile');
       label.textContent = "This file changed since you last looked at it. Here's what moved:";
       buildUnifiedDiff(body, data.diff || []);
     }
@@ -515,6 +552,7 @@
 
   function hideReference() {
     document.getElementById('reference-panel').style.display = 'none';
+    document.getElementById('editor-area').classList.remove('reconcile');
   }
 
   // Mount the WYSIWYG editor for the current file, loaded with `content` as the

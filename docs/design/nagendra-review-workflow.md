@@ -311,19 +311,22 @@ pane above the editor**, and editing always proceeds from `upstream`:
 - `two_way` → show the reference pane with `lineDiff(seen, upstream)` (added lines
   green, removed red, GitHub‑style) — informational "here's what moved since you
   last looked" — and mount the editor on `upstream`.
-- `three_way` → show the reference pane as a **3‑column** view: **Original |
-  Upstream (author) | Your edits**, aligned by the `diff` rows from `threeWay`;
-  highlight cells differing from base, mark `conflict` rows amber. Mount the
+- `three_way` → lay the reference pane **beside the editor** (reference left,
+  editor right) for compare‑while‑editing. The reference is a **2‑column** view:
+  **Original | Your edits** (the `mine`‑changed cells highlighted). The Upstream
+  column is dropped — the editor already shows upstream — but conflict awareness
+  is kept: rows both sides changed are flagged amber and the author's clashing
+  line is shown inline (`⚠ The author also changed this line to: …`). Mount the
   editor on `upstream`. Editing **always continues from upstream** — the reviewer
   can never drop the author's changes wholesale by taking their own stale‑based
-  version. The "Your edits" column is reference: they re‑apply those changes on
-  top of upstream by hand, and the result autosaves as usual. (Rationale:
-  committing a mine‑based version would revert any *other* lines the author
-  changed upstream; re‑applying onto upstream cannot.)
+  version. The reviewer re‑applies their changes (left column) into the editor by
+  hand, and the result autosaves as usual. (Rationale: committing a mine‑based
+  version would revert any *other* lines the author changed upstream; re‑applying
+  onto upstream cannot.)
 
-The reference pane is height‑bounded and collapsible (Hide/Show) so it never
-crowds out the editor. On a read‑only **submitted** session no reference pane is
-shown — there is nothing to reconcile.
+The reference pane is collapsible (Hide/Show): height‑bounded above the editor in
+the two‑way case, a left column in the three‑way case. On a read‑only
+**submitted** session no reference pane is shown — there is nothing to reconcile.
 
 Implement the diff renderer as plain DOM tables/divs from the server‑provided
 `diff` arrays — **no client‑side diff computation**. Add minimal CSS following
