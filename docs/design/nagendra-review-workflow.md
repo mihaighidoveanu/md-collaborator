@@ -303,23 +303,27 @@ unopened‑files warning modal stays.
 
 ### 6.2 Default‑open diff view (D4, req 2 & 5)
 
-When `openFile` fetches a file, branch on the response `view`:
+When `openFile` fetches a file, branch on the response `view`. The editor is
+**never gated behind a button** — diffs surface as a collapsible **reference
+pane above the editor**, and editing always proceeds from `upstream`:
 
-- `plain` → current behavior (load `content` into Toast UI).
-- `two_way` → render a **read‑first diff panel** above/around the editor showing
-  `lineDiff(seen, upstream)` with added lines green, removed red (GitHub‑style).
-  Provide a "Start editing" affordance that drops into the normal editor loaded
-  with `upstream`. The diff is informational ("here's what moved since you last
-  looked").
-- `three_way` → render a **3‑column** view: **Original | Upstream (author) | Your
-  edits**, aligned by the `diff` rows from `threeWay`. Highlight cells differing
-  from base; mark `conflict` rows distinctly (amber). Editing **always continues
-  from upstream** (single **"Edit from upstream"** action) — the reviewer can
-  never drop the author's changes wholesale by taking their own stale‑based
-  version. The "Your edits" column is reference: the reviewer re‑applies those
-  changes on top of upstream by hand, and the result autosaves as usual.
-  (Rationale: starting from mine and committing it would revert any *other* lines
-  the author changed upstream; starting from upstream and re‑applying cannot.)
+- `plain` → load `content` into Toast UI; no reference pane.
+- `two_way` → show the reference pane with `lineDiff(seen, upstream)` (added lines
+  green, removed red, GitHub‑style) — informational "here's what moved since you
+  last looked" — and mount the editor on `upstream`.
+- `three_way` → show the reference pane as a **3‑column** view: **Original |
+  Upstream (author) | Your edits**, aligned by the `diff` rows from `threeWay`;
+  highlight cells differing from base, mark `conflict` rows amber. Mount the
+  editor on `upstream`. Editing **always continues from upstream** — the reviewer
+  can never drop the author's changes wholesale by taking their own stale‑based
+  version. The "Your edits" column is reference: they re‑apply those changes on
+  top of upstream by hand, and the result autosaves as usual. (Rationale:
+  committing a mine‑based version would revert any *other* lines the author
+  changed upstream; re‑applying onto upstream cannot.)
+
+The reference pane is height‑bounded and collapsible (Hide/Show) so it never
+crowds out the editor. On a read‑only **submitted** session no reference pane is
+shown — there is nothing to reconcile.
 
 Implement the diff renderer as plain DOM tables/divs from the server‑provided
 `diff` arrays — **no client‑side diff computation**. Add minimal CSS following

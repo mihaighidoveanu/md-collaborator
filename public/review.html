@@ -94,42 +94,46 @@
       color: #6a737d;
       font-size: 15px;
     }
-    #editor-wrap { flex: 1; overflow: hidden; }
+    #editor-wrap { flex: 1; min-height: 0; overflow: hidden; }
     #editor-wrap .toastui-editor-defaultUI { height: 100%; }
 
-    #diff-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    #diff-banner {
+    /* Reference pane: shows what moved upstream, sitting above the editor so the
+       reviewer can re-apply their changes. Collapsible and height-bounded. */
+    #reference-panel { flex-shrink: 0; display: flex; flex-direction: column; max-height: 45vh; border-bottom: 1px solid #e1e4e8; }
+    #reference-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 12px 20px;
+      padding: 10px 20px;
       background: #fff8e6;
       border-bottom: 1px solid #f2dca7;
       font-size: 13px;
       color: #6a5500;
+      flex-shrink: 0;
     }
-    #start-editing-btn {
-      background: #2da44e;
-      color: #fff;
-      border: none;
+    #reference-toggle {
+      border: 1px solid #d0d7de;
+      background: #fff;
+      color: #24292e;
       border-radius: 6px;
-      padding: 6px 14px;
-      font-size: 13px;
+      padding: 4px 12px;
+      font-size: 12px;
       font-weight: 600;
       cursor: pointer;
       white-space: nowrap;
     }
-    #start-editing-btn:hover { background: #2c974b; }
-    #diff-body {
-      flex: 1;
+    #reference-toggle:hover { background: #f6f8fa; }
+    #reference-body {
       overflow: auto;
-      padding: 12px 0;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12.5px;
       line-height: 1.5;
       background: #fff;
     }
+    #reference-panel.collapsed #reference-body { display: none; }
+
+    /* Two-way unified diff rows */
     .diff-row { display: flex; padding: 0 16px; white-space: pre-wrap; word-break: break-word; }
     .diff-row .diff-gutter { width: 16px; flex-shrink: 0; color: #6a737d; user-select: none; }
     .diff-row .diff-text { flex: 1; }
@@ -139,34 +143,8 @@
     .diff-row.del .diff-gutter { color: #cb2431; }
     .diff-row.eq { color: #57606a; }
 
-    #threeway-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    #threeway-banner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 12px 20px;
-      background: #fff8e6;
-      border-bottom: 1px solid #f2dca7;
-      font-size: 13px;
-      color: #6a5500;
-    }
-    .threeway-actions { display: flex; gap: 8px; flex-shrink: 0; }
-    .threeway-actions button {
-      border: 1px solid #d0d7de;
-      background: #fff;
-      color: #24292e;
-      border-radius: 6px;
-      padding: 6px 12px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .threeway-actions button:hover { background: #f6f8fa; }
-    .threeway-actions button.primary { background: #2da44e; color: #fff; border-color: #2da44e; }
-    .threeway-actions button.primary:hover { background: #2c974b; }
-    #threeway-head { display: flex; border-bottom: 1px solid #e1e4e8; background: #f6f8fa; }
+    /* Three-way column header + rows */
+    #threeway-head { display: flex; border-bottom: 1px solid #e1e4e8; background: #f6f8fa; position: sticky; top: 0; }
     #threeway-head .tw-col {
       flex: 1;
       padding: 8px 12px;
@@ -178,14 +156,6 @@
       border-right: 1px solid #e1e4e8;
     }
     #threeway-head .tw-col:last-child { border-right: none; }
-    #threeway-body {
-      flex: 1;
-      overflow: auto;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12.5px;
-      line-height: 1.5;
-      background: #fff;
-    }
     .tw-row { display: flex; }
     .tw-row.conflict { background: #fff8e6; }
     .tw-cell {
@@ -328,26 +298,12 @@
   </div>
   <div id="editor-area">
     <div id="no-file">Select a file to review</div>
-    <div id="diff-panel" style="display:none">
-      <div id="diff-banner">
-        <span>This file changed since you last looked at it. Here's what's new:</span>
-        <button id="start-editing-btn">Start editing</button>
+    <div id="reference-panel" style="display:none">
+      <div id="reference-header">
+        <span id="reference-label"></span>
+        <button id="reference-toggle">Hide</button>
       </div>
-      <div id="diff-body"></div>
-    </div>
-    <div id="threeway-panel" style="display:none">
-      <div id="threeway-banner">
-        <span>This file changed upstream while you had unsent edits. You'll continue from the upstream version — re-apply your changes (shown on the right) on top of it, so the author's updates aren't lost.</span>
-        <div class="threeway-actions">
-          <button id="take-upstream-btn" class="primary">Edit from upstream</button>
-        </div>
-      </div>
-      <div id="threeway-head">
-        <div class="tw-col">Original</div>
-        <div class="tw-col">Upstream (author)</div>
-        <div class="tw-col">Your edits (re-apply)</div>
-      </div>
-      <div id="threeway-body"></div>
+      <div id="reference-body"></div>
     </div>
     <div id="editor-wrap" style="display:none"></div>
   </div>
@@ -490,9 +446,9 @@
     if (el) el.classList.add('edited');
   }
 
-  function renderDiffRows(rows) {
-    const body = document.getElementById('diff-body');
-    body.innerHTML = '';
+  // Build the unified two-way diff (what moved upstream since last look) into
+  // a container element.
+  function buildUnifiedDiff(container, rows) {
     const gutter = { eq: ' ', add: '+', del: '-' };
     rows.forEach(r => {
       const row = document.createElement('div');
@@ -505,13 +461,22 @@
       t.textContent = r.text;
       row.appendChild(g);
       row.appendChild(t);
-      body.appendChild(row);
+      container.appendChild(row);
     });
   }
 
-  function renderThreeWayRows(rows) {
-    const body = document.getElementById('threeway-body');
-    body.innerHTML = '';
+  // Build the three-way table (Original | Upstream | Your edits) into a
+  // container element.
+  function buildThreeWay(container, rows) {
+    const head = document.createElement('div');
+    head.id = 'threeway-head';
+    ['Original', 'Upstream (author)', 'Your edits (re-apply)'].forEach(label => {
+      const col = document.createElement('div');
+      col.className = 'tw-col';
+      col.textContent = label;
+      head.appendChild(col);
+    });
+    container.appendChild(head);
     rows.forEach(r => {
       const row = document.createElement('div');
       row.className = 'tw-row' + (r.conflict ? ' conflict' : '');
@@ -524,21 +489,37 @@
       row.appendChild(cell(r.base, false));
       row.appendChild(cell(r.upstream, r.upstreamChanged));
       row.appendChild(cell(r.mine, r.mineChanged));
-      body.appendChild(row);
+      container.appendChild(row);
     });
   }
 
-  // Hide every alternate view so a single one is shown at a time.
-  function hidePanels() {
-    document.getElementById('diff-panel').style.display = 'none';
-    document.getElementById('threeway-panel').style.display = 'none';
-    document.getElementById('editor-wrap').style.display = 'none';
+  // Show the reference pane above the editor: a two-way diff of what moved, or
+  // the three-way comparison the reviewer re-applies their edits from. The
+  // editor still mounts on upstream — the pane is reference, not a gate.
+  function showReference(data) {
+    const panel = document.getElementById('reference-panel');
+    const label = document.getElementById('reference-label');
+    const body = document.getElementById('reference-body');
+    body.innerHTML = '';
+    if (data.view === 'three_way') {
+      label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) on top of the upstream version below.';
+      buildThreeWay(body, data.diff || []);
+    } else {
+      label.textContent = "This file changed since you last looked at it. Here's what moved:";
+      buildUnifiedDiff(body, data.diff || []);
+    }
+    panel.classList.remove('collapsed');
+    document.getElementById('reference-toggle').textContent = 'Hide';
+    panel.style.display = 'flex';
+  }
+
+  function hideReference() {
+    document.getElementById('reference-panel').style.display = 'none';
   }
 
   // Mount the WYSIWYG editor for the current file, loaded with `content` as the
-  // editing baseline.
+  // editing baseline. Does not touch the reference pane.
   function mountEditor(content) {
-    hidePanels();
     const wrap = document.getElementById('editor-wrap');
     wrap.style.display = 'flex';
 
@@ -574,40 +555,6 @@
     }
   }
 
-  // Show the read-first two-way diff of what moved upstream since last look.
-  // The editor mounts lazily when the reviewer chooses to start editing.
-  function showDiffPanel(filePath, data) {
-    if (editor) { editor.destroy(); editor = null; }
-    hidePanels();
-    document.getElementById('save-btn').disabled = true;
-    renderDiffRows(data.diff || []);
-    document.getElementById('diff-panel').style.display = 'flex';
-
-    const btn = document.getElementById('start-editing-btn');
-    btn.onclick = () => {
-      if (currentFile !== filePath) return;
-      mountEditor(data.upstream);
-    };
-  }
-
-  // Show the three-way reconcile view (Original | Upstream | Your edits) for a
-  // file the reviewer edited and that also drifted upstream. Editing always
-  // continues from upstream so the author's changes can never be dropped
-  // wholesale; the reviewer re-applies their own edits (the reference column)
-  // on top.
-  function showThreeWayPanel(filePath, data) {
-    if (editor) { editor.destroy(); editor = null; }
-    hidePanels();
-    document.getElementById('save-btn').disabled = true;
-    renderThreeWayRows(data.diff || []);
-    document.getElementById('threeway-panel').style.display = 'flex';
-
-    document.getElementById('take-upstream-btn').onclick = () => {
-      if (currentFile !== filePath) return;
-      mountEditor(data.upstream);
-    };
-  }
-
   async function openFile(filePath) {
     if (currentFile === filePath) return;
 
@@ -621,7 +568,6 @@
     setActiveFile(filePath);
 
     const data = await api('GET', `/files/${encodeURIComponent(filePath)}`);
-    fileOriginals[filePath] = data.content;
 
     const fileEntry = (sessionData?.files || []).find(f => f.path === filePath);
     if (fileEntry) fileEntry.visited = true;
@@ -629,15 +575,17 @@
     document.getElementById('no-file').style.display = 'none';
 
     const isSubmitted = sessionData?.status === 'submitted';
-    // Diffs open by default when something changed — but never on a read-only
-    // submitted session, where editing (and thus reconciling) is moot.
-    if (data.view === 'three_way' && !isSubmitted) {
-      showThreeWayPanel(filePath, data);
-    } else if (data.view === 'two_way' && !isSubmitted) {
-      showDiffPanel(filePath, data);
-    } else {
-      mountEditor(data.content);
-    }
+    // When something moved (two- or three-way), keep the comparison visible as a
+    // reference and edit from upstream so the author's changes are never dropped.
+    // On a read-only submitted session there's nothing to reconcile.
+    const hasReference = (data.view === 'two_way' || data.view === 'three_way') && !isSubmitted;
+    const editContent = hasReference ? data.upstream : data.content;
+
+    if (hasReference) showReference(data);
+    else hideReference();
+
+    fileOriginals[filePath] = editContent;
+    mountEditor(editContent);
   }
 
   async function saveCurrentFile() {
@@ -769,6 +717,13 @@
       approveBtn.addEventListener('click', submit);
       document.getElementById('save-btn').addEventListener('click', manualSave);
     }
+
+    // Collapse / expand the reference pane.
+    document.getElementById('reference-toggle').addEventListener('click', () => {
+      const panel = document.getElementById('reference-panel');
+      const collapsed = panel.classList.toggle('collapsed');
+      document.getElementById('reference-toggle').textContent = collapsed ? 'Show' : 'Hide';
+    });
 
     // Auto-open first file
     if (sessionData.files.length > 0) {
