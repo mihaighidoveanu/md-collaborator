@@ -6,7 +6,7 @@
 
 **Suggested level** per test: **U** = pure-logic unit · **I** = API/integration · **E** = end-to-end browser. This is guidance for whoever implements them, not part of the assertion.
 
-**Total: 34 tests.**
+**Total: 37 tests.**
 
 > ⚠️ Two tests encode *intended* behavior that the current implementation does not yet satisfy (marked **[drives fix]**). They are expected to fail until the code is corrected.
 
@@ -166,6 +166,21 @@ what changed rather than dropping them straight into the editor.
 
 ---
 
+## REQ-16 — The reviewer can reconcile their unsent edits against drifted upstream
+
+When the reviewer has edited a file and the upstream content has *also* moved
+since their edit baseline, the file opens to a three-way view — original,
+upstream (author), and their own unsent edits — with clashing lines flagged so
+they can reconcile rather than silently clobber.
+
+| # | Type | Lvl | Behavior |
+|---|------|-----|----------|
+| R16.1 | happy | I/E | An edited file whose upstream drifted opens a three-way view; a line both sides changed is flagged as a conflict |
+| R16.2 | edge | I | Non-overlapping edits (reviewer and author touched different lines) open three-way with no conflicts |
+| R16.3 | edge | I | An edited file whose upstream has not moved stays a direct (plain) view — no reconciliation needed |
+
+---
+
 ## Traceability Summary
 
 | Requirement | Tests | Happy | Unhappy/Edge |
@@ -185,6 +200,7 @@ what changed rather than dropping them straight into the editor.
 | R13 Revoked link | R13.1 | — | ✓ |
 | R14 Diagrams | R14.1 | ✓ | — |
 | R15 Change awareness | R15.1–R15.2 | ✓ | — |
+| R16 Three-way reconcile | R16.1–R16.3 | ✓ | ✓ |
 
 Every requirement has at least one test; every requirement with a meaningful failure mode has a negative test; the highest-risk business logic (submission, commit integrity, conflict safety) carries its edge cases.
 

@@ -1,7 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { reconstructMinimalContent } = require('../lib/minimalDiff');
-const { lineDiff } = require('../lib/diff');
+const { lineDiff, threeWay } = require('../lib/diff');
 const { withRetry } = require('../lib/retry');
 const createSessionMiddleware = require('../middleware/session');
 
@@ -91,7 +91,7 @@ function createReviewRouter({ db, github }) {
     }
 
     const edit = db.prepare(
-      'SELECT content, original_content FROM file_edits WHERE session_id = ? AND file_path = ?'
+      'SELECT content, original_content, base_sha FROM file_edits WHERE session_id = ? AND file_path = ?'
     ).get(session.id, filePath);
     const visit = db.prepare(
       'SELECT seen_content, seen_sha FROM file_visits WHERE session_id = ? AND file_path = ?'
@@ -108,13 +108,20 @@ function createReviewRouter({ db, github }) {
     }
 
     // Fast path: the head SHA identifies the whole tree, so if it has not moved
-    // since the reviewer last saw this file, the upstream content is byte-for-byte
-    // what we already cached — serve that and skip the content fetch entirely.
-    // (A *mismatch* only means something on the branch moved, not necessarily
-    // this file, so that case falls through to a real content comparison below.)
+    // since the reviewer last looked, upstream is byte-for-byte what we already
+    // have — serve it and skip the content fetch. (A *mismatch* only means
+    // something on the branch moved, not necessarily this file, so it falls
+    // through to a real content comparison below.)
+    //   - unedited file: compare against the last-seen head.
+    //   - edited file: compare against the head the edit baseline was taken at;
+    //     if it hasn't moved, upstream can't have drifted from base, so there is
+    //     nothing to reconcile — just show their edit.
     if (mine === null && visit && visit.seen_sha && visit.seen_sha === liveHeadSha
         && typeof visit.seen_content === 'string') {
       return res.json({ view: 'plain', content: visit.seen_content, source: 'github' });
+    }
+    if (mine !== null && edit.base_sha && edit.base_sha === liveHeadSha) {
+      return res.json({ view: 'plain', content: mine, source: 'edit' });
     }
 
     let upstream;
@@ -130,9 +137,23 @@ function createReviewRouter({ db, github }) {
 
     let payload;
     if (mine !== null) {
-      // The reviewer has edited this file. Three-way reconciliation against a
-      // drifted upstream arrives in a later phase; for now, show their edit.
-      payload = { view: 'plain', content: mine, source: 'edit' };
+      const base = edit.original_content;
+      if (upstream !== null && typeof base === 'string' && upstream !== base) {
+        // The reviewer edited this file AND upstream drifted from their baseline:
+        // surface all three so they can reconcile (req 5).
+        payload = {
+          view: 'three_way',
+          content: mine,
+          source: 'edit',
+          base,
+          upstream,
+          mine,
+          diff: threeWay(base, upstream, mine),
+        };
+      } else {
+        // No upstream drift (or no usable baseline) — just show their edit.
+        payload = { view: 'plain', content: mine, source: 'edit' };
+      }
     } else if (visit && typeof visit.seen_content === 'string' && visit.seen_content !== upstream) {
       // Upstream moved since the reviewer last looked at this file.
       payload = {

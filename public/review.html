@@ -139,6 +139,68 @@
     .diff-row.del .diff-gutter { color: #cb2431; }
     .diff-row.eq { color: #57606a; }
 
+    #threeway-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    #threeway-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 20px;
+      background: #fff8e6;
+      border-bottom: 1px solid #f2dca7;
+      font-size: 13px;
+      color: #6a5500;
+    }
+    .threeway-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .threeway-actions button {
+      border: 1px solid #d0d7de;
+      background: #fff;
+      color: #24292e;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .threeway-actions button:hover { background: #f6f8fa; }
+    .threeway-actions button.primary { background: #2da44e; color: #fff; border-color: #2da44e; }
+    .threeway-actions button.primary:hover { background: #2c974b; }
+    #threeway-head { display: flex; border-bottom: 1px solid #e1e4e8; background: #f6f8fa; }
+    #threeway-head .tw-col {
+      flex: 1;
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #6a737d;
+      border-right: 1px solid #e1e4e8;
+    }
+    #threeway-head .tw-col:last-child { border-right: none; }
+    #threeway-body {
+      flex: 1;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.5;
+      background: #fff;
+    }
+    .tw-row { display: flex; }
+    .tw-row.conflict { background: #fff8e6; }
+    .tw-cell {
+      flex: 1;
+      padding: 1px 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      border-right: 1px solid #eaecef;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .tw-cell:last-child { border-right: none; }
+    .tw-cell.empty { background: #fafbfc; }
+    .tw-cell.changed { background: #e6ffed; }
+    .tw-row.conflict .tw-cell.changed { background: #ffe9b3; }
+
     #status-banner {
       display: none;
       padding: 16px 24px;
@@ -272,6 +334,22 @@
         <button id="start-editing-btn">Start editing</button>
       </div>
       <div id="diff-body"></div>
+    </div>
+    <div id="threeway-panel" style="display:none">
+      <div id="threeway-banner">
+        <span>This file changed upstream while you had unsaved edits. Reconcile the differences:</span>
+        <div class="threeway-actions">
+          <button id="keep-mine-btn">Keep mine</button>
+          <button id="take-upstream-btn">Take upstream</button>
+          <button id="edit-merged-btn" class="primary">Edit to merge</button>
+        </div>
+      </div>
+      <div id="threeway-head">
+        <div class="tw-col">Original</div>
+        <div class="tw-col">Upstream (author)</div>
+        <div class="tw-col">Your edits</div>
+      </div>
+      <div id="threeway-body"></div>
     </div>
     <div id="editor-wrap" style="display:none"></div>
   </div>
@@ -433,10 +511,36 @@
     });
   }
 
-  // Mount the WYSIWYG editor for the current file, loaded with `content` as the
-  // editing baseline. Hides the diff panel if it was showing.
-  function mountEditor(content) {
+  function renderThreeWayRows(rows) {
+    const body = document.getElementById('threeway-body');
+    body.innerHTML = '';
+    rows.forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'tw-row' + (r.conflict ? ' conflict' : '');
+      const cell = (text, changed) => {
+        const c = document.createElement('div');
+        c.className = 'tw-cell' + (text === null ? ' empty' : '') + (changed ? ' changed' : '');
+        c.textContent = text === null ? '' : text;
+        return c;
+      };
+      row.appendChild(cell(r.base, false));
+      row.appendChild(cell(r.upstream, r.upstreamChanged));
+      row.appendChild(cell(r.mine, r.mineChanged));
+      body.appendChild(row);
+    });
+  }
+
+  // Hide every alternate view so a single one is shown at a time.
+  function hidePanels() {
     document.getElementById('diff-panel').style.display = 'none';
+    document.getElementById('threeway-panel').style.display = 'none';
+    document.getElementById('editor-wrap').style.display = 'none';
+  }
+
+  // Mount the WYSIWYG editor for the current file, loaded with `content` as the
+  // editing baseline.
+  function mountEditor(content) {
+    hidePanels();
     const wrap = document.getElementById('editor-wrap');
     wrap.style.display = 'flex';
 
@@ -476,7 +580,7 @@
   // The editor mounts lazily when the reviewer chooses to start editing.
   function showDiffPanel(filePath, data) {
     if (editor) { editor.destroy(); editor = null; }
-    document.getElementById('editor-wrap').style.display = 'none';
+    hidePanels();
     document.getElementById('save-btn').disabled = true;
     renderDiffRows(data.diff || []);
     document.getElementById('diff-panel').style.display = 'flex';
@@ -486,6 +590,28 @@
       if (currentFile !== filePath) return;
       mountEditor(data.upstream);
     };
+  }
+
+  // Show the three-way reconcile view (Original | Upstream | Your edits) for a
+  // file the reviewer edited and that also drifted upstream. Each action exits
+  // into the editor loaded with the chosen side; whatever they land on autosaves
+  // as usual, so they can hand-merge by editing.
+  function showThreeWayPanel(filePath, data) {
+    if (editor) { editor.destroy(); editor = null; }
+    hidePanels();
+    document.getElementById('save-btn').disabled = true;
+    renderThreeWayRows(data.diff || []);
+    document.getElementById('threeway-panel').style.display = 'flex';
+
+    const wire = (id, content) => {
+      document.getElementById(id).onclick = () => {
+        if (currentFile !== filePath) return;
+        mountEditor(content);
+      };
+    };
+    wire('keep-mine-btn', data.mine);
+    wire('take-upstream-btn', data.upstream);
+    wire('edit-merged-btn', data.mine);
   }
 
   async function openFile(filePath) {
@@ -509,9 +635,11 @@
     document.getElementById('no-file').style.display = 'none';
 
     const isSubmitted = sessionData?.status === 'submitted';
-    // A two-way diff opens by default when upstream moved since the last look —
-    // but never on a read-only submitted session, where editing is moot.
-    if (data.view === 'two_way' && !isSubmitted) {
+    // Diffs open by default when something changed — but never on a read-only
+    // submitted session, where editing (and thus reconciling) is moot.
+    if (data.view === 'three_way' && !isSubmitted) {
+      showThreeWayPanel(filePath, data);
+    } else if (data.view === 'two_way' && !isSubmitted) {
       showDiffPanel(filePath, data);
     } else {
       mountEditor(data.content);

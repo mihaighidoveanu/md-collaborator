@@ -164,6 +164,65 @@ test('R15.2 after the reviewer has seen a file, an upstream change opens a two-w
   assert.equal(settled.json.view, 'plain', 'watermark advanced to the new upstream');
 });
 
+// REQ-16 — Three-way reconciliation: edited file + drifted upstream.
+
+test('R16.1 an edited file whose upstream drifted opens a three-way view with the clash flagged', async () => {
+  active = await setup({ contents: { 'docs/intro.md': '# Title\nline a\nline b\n', 'README.md': '# Readme\n' } });
+  const { ctx, github, session } = active;
+  const p = filePath('docs/intro.md');
+
+  // The reviewer edits line a.
+  await ctx.request('PUT', `/review/api/${session.token}/files/${p}`,
+    { body: { content: '# Title\nline a MINE\nline b\n', originalContent: '# Title\nline a\nline b\n' } });
+
+  // The author pushes a different edit to the same line upstream.
+  github.pushCommit('acme', 'docs', 'feature', 'sha-2-newer', { 'docs/intro.md': '# Title\nline a UPSTREAM\nline b\n' });
+
+  const res = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
+  assert.equal(res.json.view, 'three_way');
+  assert.equal(res.json.base, '# Title\nline a\nline b\n', 'the baseline the reviewer started from');
+  assert.equal(res.json.upstream, '# Title\nline a UPSTREAM\nline b\n', 'the current upstream');
+  assert.equal(res.json.mine, '# Title\nline a MINE\nline b\n', 'the reviewer\'s unsent edit');
+
+  const conflictRow = res.json.diff.find(r => r.conflict);
+  assert.ok(conflictRow, 'the line both sides changed is flagged as a conflict');
+  assert.equal(conflictRow.base, 'line a');
+  assert.equal(conflictRow.upstream, 'line a UPSTREAM');
+  assert.equal(conflictRow.mine, 'line a MINE');
+});
+
+test('R16.2 non-overlapping edits open three-way with no conflict', async () => {
+  active = await setup({ contents: { 'docs/intro.md': '# Title\nline a\nline b\n', 'README.md': '# Readme\n' } });
+  const { ctx, github, session } = active;
+  const p = filePath('docs/intro.md');
+
+  // Reviewer changes line a; author changes line b.
+  await ctx.request('PUT', `/review/api/${session.token}/files/${p}`,
+    { body: { content: '# Title\nline a MINE\nline b\n', originalContent: '# Title\nline a\nline b\n' } });
+  github.pushCommit('acme', 'docs', 'feature', 'sha-2-newer', { 'docs/intro.md': '# Title\nline a\nline b UPSTREAM\n' });
+
+  const res = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
+  assert.equal(res.json.view, 'three_way');
+  assert.ok(res.json.diff.every(r => !r.conflict), 'no row is a conflict');
+  assert.ok(res.json.diff.some(r => r.base === 'line a' && r.mineChanged && !r.upstreamChanged), 'reviewer change on line a');
+  assert.ok(res.json.diff.some(r => r.base === 'line b' && r.upstreamChanged && !r.mineChanged), 'author change on line b');
+});
+
+test('R16.3 an edited file whose upstream has not moved stays a plain view (no needless fetch)', async () => {
+  active = await setup();
+  const { ctx, github, session } = active;
+  const p = filePath('docs/intro.md');
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${p}`,
+    { body: { content: '# Intro\nmine\n', originalContent: '# Intro\nhello\n' } });
+
+  const res = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
+  assert.equal(res.json.view, 'plain', 'no upstream drift, so no reconciliation');
+  assert.equal(res.json.content, '# Intro\nmine\n', 'the reviewer sees their edit');
+  // base_sha matches the live head, so the edit needs no upstream comparison.
+  assert.equal(github.calls.getFileContent.length, 0, 'no content fetch needed');
+});
+
 // REQ-9 — Submission opens a PR and closes the session.
 
 test('R9.1 submitting with edits opens one branch, one commit, and one PR; session is submitted', async () => {
