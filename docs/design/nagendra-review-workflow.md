@@ -313,13 +313,13 @@ When `openFile` fetches a file, branch on the response `view`:
   looked").
 - `three_way` → render a **3‑column** view: **Original | Upstream (author) | Your
   edits**, aligned by the `diff` rows from `threeWay`. Highlight cells differing
-  from base; mark `conflict` rows distinctly (amber). Offer two starting points:
-  **"Edit from mine"** and **"Edit from upstream"**, each of which exits into the
-  editor loaded with that side. From there the editor is free, so the reviewer
-  hand‑merges by pulling in whatever they want from the other column they just
-  compared; whatever they land on autosaves as usual. (A third "edit merged"
-  button was dropped as redundant — it loaded the same content as "Edit from
-  mine".)
+  from base; mark `conflict` rows distinctly (amber). Editing **always continues
+  from upstream** (single **"Edit from upstream"** action) — the reviewer can
+  never drop the author's changes wholesale by taking their own stale‑based
+  version. The "Your edits" column is reference: the reviewer re‑applies those
+  changes on top of upstream by hand, and the result autosaves as usual.
+  (Rationale: starting from mine and committing it would revert any *other* lines
+  the author changed upstream; starting from upstream and re‑applying cannot.)
 
 Implement the diff renderer as plain DOM tables/divs from the server‑provided
 `diff` arrays — **no client‑side diff computation**. Add minimal CSS following

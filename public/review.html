@@ -337,16 +337,15 @@
     </div>
     <div id="threeway-panel" style="display:none">
       <div id="threeway-banner">
-        <span>This file changed upstream while you had unsaved edits. Reconcile the differences:</span>
+        <span>This file changed upstream while you had unsent edits. You'll continue from the upstream version — re-apply your changes (shown on the right) on top of it, so the author's updates aren't lost.</span>
         <div class="threeway-actions">
-          <button id="keep-mine-btn" class="primary">Edit from mine</button>
-          <button id="take-upstream-btn">Edit from upstream</button>
+          <button id="take-upstream-btn" class="primary">Edit from upstream</button>
         </div>
       </div>
       <div id="threeway-head">
         <div class="tw-col">Original</div>
         <div class="tw-col">Upstream (author)</div>
-        <div class="tw-col">Your edits</div>
+        <div class="tw-col">Your edits (re-apply)</div>
       </div>
       <div id="threeway-body"></div>
     </div>
@@ -592,9 +591,10 @@
   }
 
   // Show the three-way reconcile view (Original | Upstream | Your edits) for a
-  // file the reviewer edited and that also drifted upstream. The reviewer picks
-  // a starting point; from there the editor is free, so they hand-merge by
-  // pulling in whatever they want from the other column they just compared.
+  // file the reviewer edited and that also drifted upstream. Editing always
+  // continues from upstream so the author's changes can never be dropped
+  // wholesale; the reviewer re-applies their own edits (the reference column)
+  // on top.
   function showThreeWayPanel(filePath, data) {
     if (editor) { editor.destroy(); editor = null; }
     hidePanels();
@@ -602,14 +602,10 @@
     renderThreeWayRows(data.diff || []);
     document.getElementById('threeway-panel').style.display = 'flex';
 
-    const wire = (id, content) => {
-      document.getElementById(id).onclick = () => {
-        if (currentFile !== filePath) return;
-        mountEditor(content);
-      };
+    document.getElementById('take-upstream-btn').onclick = () => {
+      if (currentFile !== filePath) return;
+      mountEditor(data.upstream);
     };
-    wire('keep-mine-btn', data.mine);
-    wire('take-upstream-btn', data.upstream);
   }
 
   async function openFile(filePath) {
