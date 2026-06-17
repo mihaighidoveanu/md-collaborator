@@ -6,9 +6,9 @@
 
 **Suggested level** per test: **U** = pure-logic unit · **I** = API/integration · **E** = end-to-end browser. This is guidance for whoever implements them, not part of the assertion.
 
-**Total: 31 tests.**
+**Total: 32 tests.**
 
-> ⚠️ Three tests encode *intended* behavior that the current implementation does not yet satisfy (marked **[drives fix]**). They are expected to fail until the code is corrected.
+> ⚠️ Two tests encode *intended* behavior that the current implementation does not yet satisfy (marked **[drives fix]**). They are expected to fail until the code is corrected.
 
 ---
 
@@ -84,22 +84,25 @@ Reviewers see all of the PR's markdown and nothing else.
 
 ---
 
-## REQ-8 — The system tracks review progress and guards approval
+## REQ-8 — The system tracks review progress and guards submission
 
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
 | R8.1 | happy | I/E | Opening a file marks it as reviewed |
-| R8.2 | unhappy | E | Approving while some files are still unopened warns the reviewer before proceeding |
+| R8.2 | unhappy | E | Submitting while some files are still unopened warns the reviewer before proceeding |
 
 ---
 
-## REQ-9 — Approval commits the edits to the PR and closes the session
+## REQ-9 — Submission opens a pull request and closes the session
+
+The reviewer never writes to the PR's own branch: edits land on a fresh branch
+and a new PR targets the original PR's head branch (non-blocking review).
 
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
-| R9.1 | happy | I/E | Approving with edits writes a single commit to the PR branch and locks the session as approved |
+| R9.1 | happy | I/E | Submitting with edits creates one fresh branch, one commit, and one PR targeting the PR's head branch, then locks the session as submitted |
 | R9.2 | happy | I | Several edited files are delivered as one commit, not many |
-| R9.3 | edge | I/E | Approving with no edits still closes the session cleanly and commits nothing **[drives fix]** |
+| R9.3 | edge | I/E | Submitting with no edits still closes the session cleanly, opening no branch or PR |
 
 ---
 
@@ -115,21 +118,22 @@ The reviewer's commit must touch only the lines they actually changed; untouched
 
 ---
 
-## REQ-11 — Approval never overwrites newer work on the branch
+## REQ-11 — Submission never overwrites newer work on the branch
 
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
-| R11.1 | unhappy | I/E | If the branch advanced since the session was created, approval is refused and the session stays open |
-| R11.2 | unhappy | I | If the commit to GitHub fails, the session stays open — never left half-approved |
+| R11.1 | happy | I/E | If the branch advanced since the session was created, submission still succeeds by branching off the live head SHA — never clobbering newer work |
+| R11.2 | unhappy | I | If the commit to GitHub fails, the session stays open — never left half-submitted |
+| R11.3 | unhappy | I | If opening the PR fails, the session stays open — never left half-submitted |
 
 ---
 
-## REQ-12 — An approved session is read-only
+## REQ-12 — A submitted session is read-only
 
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
-| R12.1 | unhappy | I/E | Editing an approved session is refused |
-| R12.2 | unhappy | I | Re-approving an already-approved session is refused |
+| R12.1 | unhappy | I/E | Editing a submitted session is refused |
+| R12.2 | unhappy | I | Re-submitting an already-submitted session is refused |
 
 ---
 
@@ -137,7 +141,7 @@ The reviewer's commit must touch only the lines they actually changed; untouched
 
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
-| R13.1 | unhappy | I/E | A revoked link cannot read, edit, or approve — the reviewer sees an error, not the editor |
+| R13.1 | unhappy | I/E | A revoked link cannot read, edit, or submit — the reviewer sees an error, not the editor |
 
 ---
 
@@ -161,9 +165,9 @@ The reviewer's commit must touch only the lines they actually changed; untouched
 | R6 Read files | R6.1–R6.3 | ✓ | ✓ |
 | R7 Edit durability | R7.1–R7.2 | ✓ | ✓ |
 | R8 Progress guard | R8.1–R8.2 | ✓ | ✓ |
-| R9 Approve & commit | R9.1–R9.3 | ✓ | ✓ |
+| R9 Submit & open PR | R9.1–R9.3 | ✓ | ✓ |
 | R10 Minimal diff | R10.1–R10.3 | ✓ | ✓ |
-| R11 Conflict safety | R11.1–R11.2 | — | ✓ |
+| R11 Conflict safety | R11.1–R11.3 | ✓ | ✓ |
 | R12 Read-only lock | R12.1–R12.2 | — | ✓ |
 | R13 Revoked link | R13.1 | — | ✓ |
 | R14 Diagrams | R14.1 | ✓ | — |
@@ -183,4 +187,4 @@ Every requirement has at least one test; every requirement with a meaningful fai
 | Large PR (markdown spanning multiple result pages) | R3.3 |
 | A file edited to change one line; another with repeated identical lines; a very large file | R10.1–R10.3 |
 | Markdown file with a mermaid block | R14.1 |
-| Sessions seeded in active / approved / revoked states | R12, R13, and state-dependent checks |
+| Sessions seeded in active / submitted / revoked states | R12, R13, and state-dependent checks |

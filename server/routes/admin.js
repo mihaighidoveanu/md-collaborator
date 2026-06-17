@@ -16,6 +16,7 @@ function createAdminRouter({ db, github }) {
   router.get('/sessions', requireAdmin, (req, res) => {
     const sessions = db.prepare(`
       SELECT id, token, owner, repo, pr_number, pr_title, head_branch, status, created_at,
+        submitted_pr_number, submitted_pr_url, submitted_branch,
         (SELECT COUNT(*) FROM file_edits WHERE session_id = sessions.id AND dirty = 1) AS edits_count
       FROM sessions ORDER BY created_at DESC
     `).all();

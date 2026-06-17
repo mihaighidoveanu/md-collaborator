@@ -36,7 +36,7 @@
     }
     #approve-btn:hover:not(:disabled) { background: #2c974b; }
     #approve-btn:disabled { background: #94d3a2; cursor: not-allowed; }
-    #approve-btn.approved { background: #6a737d; }
+    #approve-btn.submitted { background: #6a737d; }
 
     #header-actions { display: flex; gap: 8px; align-items: center; }
     #save-btn {
@@ -104,7 +104,8 @@
       font-weight: 500;
       text-align: center;
     }
-    #status-banner.approved { background: #dcffe4; color: #22863a; display: block; }
+    #status-banner.submitted { background: #dcffe4; color: #22863a; display: block; }
+    #status-banner.submitted a { color: #22863a; font-weight: 600; }
     #status-banner.revoked { background: #ffeef0; color: #cb2431; display: block; }
 
     #toast {
@@ -211,7 +212,7 @@
   </div>
   <div id="header-actions">
     <button id="save-btn" disabled>Save</button>
-    <button id="approve-btn" disabled>Approve Changes</button>
+    <button id="approve-btn" disabled>Submit for PR</button>
   </div>
 </div>
 
@@ -235,10 +236,10 @@
     <h3>Some files haven't been opened yet</h3>
     <p>You haven't reviewed the following files:</p>
     <ul class="modal-file-list" id="unvisited-list"></ul>
-    <p class="modal-warning"><strong>Once you approve, you will not be able to edit any files.</strong> Do you want to go back and review these files first?</p>
+    <p class="modal-warning"><strong>Once you submit, you will not be able to edit any files.</strong> Do you want to go back and review these files first?</p>
     <div class="modal-actions">
       <button id="modal-back-btn">Go Back and Review</button>
-      <button id="modal-approve-btn">Approve Anyway</button>
+      <button id="modal-approve-btn">Submit Anyway</button>
     </div>
   </div>
 </div>
@@ -387,7 +388,7 @@
     const wrap = document.getElementById('editor-wrap');
     wrap.style.display = 'flex';
 
-    const isApproved = sessionData?.status === 'approved';
+    const isSubmitted = sessionData?.status === 'submitted';
 
     if (editor) {
       editor.destroy();
@@ -399,7 +400,7 @@
       initialEditType: 'wysiwyg',
       previewStyle: 'vertical',
       initialValue: content,
-      toolbarItems: isApproved ? [] : [
+      toolbarItems: isSubmitted ? [] : [
         ['heading', 'bold', 'italic', 'strike'],
         ['hr', 'quote'],
         ['ul', 'ol', 'task'],
@@ -410,7 +411,7 @@
       plugins: [mermaidPlugin],
     });
 
-    if (isApproved) {
+    if (isSubmitted) {
       editor.getEditorElements().mdEditor.setAttribute('contenteditable', 'false');
       editor.getEditorElements().wwEditor.setAttribute('contenteditable', 'false');
     } else {
@@ -480,14 +481,14 @@
     });
   }
 
-  async function approve() {
+  async function submit() {
     const unvisited = (sessionData?.files || []).filter(f => !f.visited).map(f => f.path);
 
     if (unvisited.length > 0) {
       const proceed = await showIncompleteModal(unvisited);
       if (!proceed) return;
     } else {
-      if (!confirm('Are you sure you want to approve all changes? You will not be able to edit afterwards.')) return;
+      if (!confirm('Submit your edits as a pull request? You will not be able to edit afterwards.')) return;
     }
 
     // Save any pending changes first
@@ -499,26 +500,32 @@
     btn.textContent = 'Submitting…';
 
     try {
-      await api('POST', '/approve');
-      sessionData.status = 'approved';
-      showApprovedState();
-      showToast('Changes approved and committed!', 3000);
+      const result = await api('POST', '/submit');
+      sessionData.status = 'submitted';
+      sessionData.pr_number = result.pr_number;
+      sessionData.pr_url = result.pr_url;
+      showSubmittedState();
+      showToast(result.submitted ? 'Pull request opened!' : 'Review closed.', 3000);
     } catch (e) {
       btn.disabled = false;
-      btn.textContent = 'Approve Changes';
+      btn.textContent = 'Submit for PR';
       showToast('Error: ' + e.message, 4000);
     }
   }
 
-  function showApprovedState() {
+  function showSubmittedState() {
     const btn = document.getElementById('approve-btn');
-    btn.textContent = 'Approved';
+    btn.textContent = 'Submitted';
     btn.disabled = true;
-    btn.classList.add('approved');
+    btn.classList.add('submitted');
 
     const banner = document.getElementById('status-banner');
-    banner.textContent = 'Changes have been approved and committed to the pull request.';
-    banner.className = 'approved';
+    banner.className = 'submitted';
+    if (sessionData?.pr_url && sessionData?.pr_number) {
+      banner.innerHTML = `Opened pull request <a href="${sessionData.pr_url}" target="_blank">#${sessionData.pr_number}</a> → ${sessionData.head_branch || 'the PR branch'}.`;
+    } else {
+      banner.textContent = 'Your review has been submitted.';
+    }
 
     // Re-open current file as read-only
     if (currentFile) {
@@ -543,12 +550,14 @@
 
     renderFileList(sessionData.files);
 
-    if (sessionData.status === 'approved') {
-      showApprovedState();
+    if (sessionData.status === 'submitted') {
+      sessionData.pr_number = sessionData.submitted_pr_number;
+      sessionData.pr_url = sessionData.submitted_pr_url;
+      showSubmittedState();
     } else {
       const approveBtn = document.getElementById('approve-btn');
       approveBtn.disabled = false;
-      approveBtn.addEventListener('click', approve);
+      approveBtn.addEventListener('click', submit);
       document.getElementById('save-btn').addEventListener('click', manualSave);
     }
 
