@@ -121,16 +121,21 @@ test('R8.1 opening a file marks it as reviewed', async () => {
 
 // REQ-15 — Change awareness: the reviewer sees what moved upstream since last look.
 
-test('R15.1 a file whose upstream is unchanged opens as a plain view', async () => {
+test('R15.1 a file whose upstream is unchanged opens as a plain view, without re-fetching', async () => {
   active = await setup();
-  const { ctx, session } = active;
+  const { ctx, github, session } = active;
   const p = filePath('docs/intro.md');
 
   const first = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
   assert.equal(first.json.view, 'plain');
+  const fetchesAfterFirst = github.calls.getFileContent.length;
 
   const second = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
   assert.equal(second.json.view, 'plain', 'still plain when nothing moved');
+  assert.equal(second.json.content, '# Intro\nhello\n', 'serves the cached content');
+  // The branch head has not moved, so the cached content is served without
+  // another GitHub content fetch (head-SHA fast path).
+  assert.equal(github.calls.getFileContent.length, fetchesAfterFirst, 'no redundant content fetch');
 });
 
 test('R15.2 after the reviewer has seen a file, an upstream change opens a two-way diff', async () => {
@@ -142,8 +147,8 @@ test('R15.2 after the reviewer has seen a file, an upstream change opens a two-w
   const first = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
   assert.equal(first.json.view, 'plain');
 
-  // Upstream moves.
-  github.setContent('docs/intro.md', '# Intro\nhello, updated\n');
+  // A new commit lands upstream: head advances and the file content changes.
+  github.pushCommit('acme', 'docs', 'feature', 'sha-2-newer', { 'docs/intro.md': '# Intro\nhello, updated\n' });
 
   const changed = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
   assert.equal(changed.json.view, 'two_way', 'a moved file opens as a diff');

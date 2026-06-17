@@ -56,7 +56,6 @@ function createFakeGithub(config = {}) {
       }
       return null;
     },
-
     async getCurrentHeadSha(owner, repo, branch) {
       calls.getCurrentHeadSha.push({ owner, repo, branch });
       // Simulate a transient blip: throw on the first N calls, then recover.
@@ -102,9 +101,16 @@ function createFakeGithub(config = {}) {
 
     // Test-only accessors
     calls,
-    // Test-only: simulate the upstream content of a file changing after the
-    // session was created.
-    setContent(filePath, content) { contentOverrides[filePath] = content; },
+    // Test-only: simulate a new upstream commit landing on a branch. Advances
+    // the branch head AND changes file content together — the real-world
+    // invariant (content cannot change without a new commit), which the route's
+    // head-SHA fast path relies on.
+    pushCommit(owner, repo, branch, newSha, fileChanges = {}) {
+      headShas[`${owner}/${repo}@${branch}`] = newSha;
+      for (const [filePath, content] of Object.entries(fileChanges)) {
+        contentOverrides[filePath] = content;
+      }
+    },
   };
 }
 

@@ -94,17 +94,27 @@ function createReviewRouter({ db, github }) {
       'SELECT content, original_content FROM file_edits WHERE session_id = ? AND file_path = ?'
     ).get(session.id, filePath);
     const visit = db.prepare(
-      'SELECT seen_content FROM file_visits WHERE session_id = ? AND file_path = ?'
+      'SELECT seen_content, seen_sha FROM file_visits WHERE session_id = ? AND file_path = ?'
     ).get(session.id, filePath);
+    const mine = edit ? edit.content : null;
 
-    // Resolve the live upstream content. The head-SHA read is best-effort for
-    // display: a blip falls back to the session's original head rather than
-    // blocking the reviewer.
+    // Resolve the live branch head. The read is best-effort for display: a blip
+    // falls back to the session's original head rather than blocking the reviewer.
     let liveHeadSha;
     try {
       liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, session.head_branch);
     } catch {
       liveHeadSha = session.head_sha;
+    }
+
+    // Fast path: the head SHA identifies the whole tree, so if it has not moved
+    // since the reviewer last saw this file, the upstream content is byte-for-byte
+    // what we already cached — serve that and skip the content fetch entirely.
+    // (A *mismatch* only means something on the branch moved, not necessarily
+    // this file, so that case falls through to a real content comparison below.)
+    if (mine === null && visit && visit.seen_sha && visit.seen_sha === liveHeadSha
+        && typeof visit.seen_content === 'string') {
+      return res.json({ view: 'plain', content: visit.seen_content, source: 'github' });
     }
 
     let upstream;
@@ -114,7 +124,6 @@ function createReviewRouter({ db, github }) {
       return res.status(500).json({ error: err.message });
     }
 
-    const mine = edit ? edit.content : null;
     if (upstream === null && mine === null) {
       return res.status(404).json({ error: 'File not found' });
     }
