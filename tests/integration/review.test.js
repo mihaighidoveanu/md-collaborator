@@ -527,34 +527,31 @@ test('R20.2 a commit failure on a re-submit (B1) leaves the reused branch intact
   assert.equal(meta.json.status, 'active');
 });
 
-test('after a commit-submit (first submit), re-opening the file with no further edits stays plain', async () => {
-  active = await setup();
-  const { ctx, session } = active;
+test('after a commit-submit, re-opening the file with no further edits stays plain', async () => {
   const p = filePath('docs/intro.md');
 
-  await ctx.request('PUT', `/review/api/${session.token}/files/${p}`,
-    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
-  await ctx.request('POST', `/review/api/${session.token}/submit`);
-
-  // The target branch never received this commit (it went to the review
+  // The target branch never received the commit (it went to a review
   // branch), so re-reading must not compare the new baseline against the
   // target branch's stale, unrelated old content and report a fake conflict.
-  const res = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
-  assert.equal(res.json.view, 'plain', 'the committed baseline does not look drifted against itself');
+  // Checked for both ways a review branch can come into existence: a fresh
+  // one (first submit) and a reused one (B1 resubmit) — the fix computes the
+  // baseline SHA differently in each case.
+
+  active = await setup();
+  await active.ctx.request('PUT', `/review/api/${active.session.token}/files/${p}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+  await active.ctx.request('POST', `/review/api/${active.session.token}/submit`);
+  let res = await active.ctx.request('GET', `/review/api/${active.session.token}/files/${p}`);
+  assert.equal(res.json.view, 'plain', 'first submit: the committed baseline does not look drifted against itself');
   assert.equal(res.json.content, '# Intro\nedited\n');
-});
+  await active.ctx.close();
 
-test('after a re-submit on a reused review branch (B1), re-opening the file with no further edits stays plain', async () => {
   active = await setupWithReviewPr();
-  const { ctx, session } = active;
-  const p = filePath('docs/intro.md');
-
-  await ctx.request('PUT', `/review/api/${session.token}/files/${p}`,
+  await active.ctx.request('PUT', `/review/api/${active.session.token}/files/${p}`,
     { body: { content: '# Intro\nsecond round\n', originalContent: '# Intro\nhello\n' } });
-  await ctx.request('POST', `/review/api/${session.token}/submit`);
-
-  const res = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
-  assert.equal(res.json.view, 'plain', 'the committed baseline does not look drifted against itself');
+  await active.ctx.request('POST', `/review/api/${active.session.token}/submit`);
+  res = await active.ctx.request('GET', `/review/api/${active.session.token}/files/${p}`);
+  assert.equal(res.json.view, 'plain', 'B1 resubmit: the committed baseline does not look drifted against itself');
   assert.equal(res.json.content, '# Intro\nsecond round\n');
 });
 
