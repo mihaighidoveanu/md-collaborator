@@ -64,11 +64,9 @@ function createReviewRouter({ db, github }) {
     const { session } = req;
     try {
       const prFiles = await reviewableFiles(session);
-      const editedPaths = new Set(
-        db.prepare('SELECT file_path FROM file_edits WHERE session_id = ?')
-          .all(session.id)
-          .map(r => r.file_path)
-      );
+      const edits = db.prepare('SELECT file_path, dirty FROM file_edits WHERE session_id = ?').all(session.id);
+      const editedPaths = new Set(edits.map(r => r.file_path));
+      const dirtyPaths = new Set(edits.filter(r => r.dirty).map(r => r.file_path));
       const visitedPaths = new Set(
         db.prepare('SELECT file_path FROM file_visits WHERE session_id = ?')
           .all(session.id)
@@ -78,6 +76,7 @@ function createReviewRouter({ db, github }) {
         path: f.filename,
         status: f.status,
         edited: editedPaths.has(f.filename),
+        dirty: dirtyPaths.has(f.filename),
         visited: visitedPaths.has(f.filename),
       }));
       res.json({
@@ -86,6 +85,10 @@ function createReviewRouter({ db, github }) {
         owner: session.owner,
         repo: session.repo,
         status: session.status,
+        submitted_branch: session.submitted_branch,
+        submitted_pr_number: session.submitted_pr_number,
+        submitted_pr_url: session.submitted_pr_url,
+        approved_at: session.approved_at,
         files,
       });
     } catch (err) {

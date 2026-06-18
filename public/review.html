@@ -36,7 +36,6 @@
     }
     #approve-btn:hover:not(:disabled) { background: #2c974b; }
     #approve-btn:disabled { background: #94d3a2; cursor: not-allowed; }
-    #approve-btn.submitted { background: #6a737d; }
 
     #header-actions { display: flex; gap: 8px; align-items: center; }
     #save-btn {
@@ -237,6 +236,7 @@
     }
     #status-banner.submitted { background: #dcffe4; color: #22863a; display: block; }
     #status-banner.revoked { background: #ffeef0; color: #cb2431; display: block; }
+    #status-banner a { color: inherit; font-weight: 600; text-decoration: underline; }
 
     #toast {
       position: fixed;
@@ -459,7 +459,7 @@
       <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M3 1.5A1.5 1.5 0 0 0 1.5 3v7A1.5 1.5 0 0 0 3 11.5h2v2.25a.5.5 0 0 0 .82.385L9.4 11.5H13A1.5 1.5 0 0 0 14.5 10V3A1.5 1.5 0 0 0 13 1.5Z"/></svg>
     </button>
     <button id="save-btn" disabled>Save</button>
-    <button id="approve-btn" disabled>Submit your review</button>
+    <button id="approve-btn" disabled>Approve</button>
   </div>
 </div>
 
@@ -532,6 +532,7 @@
   let currentFile = null;
   let saveTimer = null;
   let mermaidCounter = 0;
+  let editorDirty = false; // unsaved keystrokes in the open editor, not yet autosaved
   const fileOriginals = {}; // filePath → raw content from GitHub
 
   async function renderMermaidInto(dom, source) {
@@ -765,7 +766,6 @@
   let composerAnchor = null;   // { paragraph_index, anchor_text } for anchored, else null
   let hoverBlock = null;
 
-  function isSubmittedSession() { return sessionData?.status === 'submitted'; }
   function proseMirrorRoot() {
     return document.querySelector('#editor-wrap .toastui-editor-ww-container .ProseMirror');
   }
@@ -815,7 +815,6 @@
       list.appendChild(empty);
       return;
     }
-    const submitted = isSubmittedSession();
     shown.forEach(c => {
       const item = document.createElement('div');
       item.className = 'comment-item' + (c.resolved ? ' resolved' : '');
@@ -841,23 +840,20 @@
       const time = document.createElement('span');
       time.textContent = relTime(c.created_at) + (c.resolved ? ' · resolved' : '');
       meta.appendChild(time);
-      if (!submitted) {
-        const resolveBtn = document.createElement('button');
-        resolveBtn.textContent = c.resolved ? 'Unresolve' : 'Resolve';
-        resolveBtn.onclick = () => toggleResolve(c);
-        meta.appendChild(resolveBtn);
-        const delBtn = document.createElement('button');
-        delBtn.textContent = 'Delete';
-        delBtn.onclick = () => deleteComment(c);
-        meta.appendChild(delBtn);
-      }
+      const resolveBtn = document.createElement('button');
+      resolveBtn.textContent = c.resolved ? 'Unresolve' : 'Resolve';
+      resolveBtn.onclick = () => toggleResolve(c);
+      meta.appendChild(resolveBtn);
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Delete';
+      delBtn.onclick = () => deleteComment(c);
+      meta.appendChild(delBtn);
       item.appendChild(meta);
       list.appendChild(item);
     });
   }
 
   function openComposer(anchor) {
-    if (isSubmittedSession()) return;
     // Capture the target file now: the composer outlives file switches, so we
     // must not read currentFile at submit time (it may have changed).
     composerAnchor = {
@@ -919,7 +915,7 @@
     const btn = document.getElementById('para-comment-btn');
     btn.style.display = 'none';
     const root = proseMirrorRoot();
-    if (!root || isSubmittedSession()) return;
+    if (!root) return;
     const area = document.getElementById('editor-area');
     let hideTimer = null;
     const cancelHide = () => clearTimeout(hideTimer);
@@ -959,7 +955,6 @@
     const wrap = document.getElementById('editor-wrap');
     wrap.style.display = 'flex';
 
-    const isSubmitted = sessionData?.status === 'submitted';
     if (editor) editor.destroy();
 
     editor = new toastui.Editor({
@@ -968,7 +963,7 @@
       initialEditType: 'wysiwyg',
       previewStyle: 'vertical',
       initialValue: content,
-      toolbarItems: isSubmitted ? [] : [
+      toolbarItems: [
         ['heading', 'bold', 'italic', 'strike'],
         ['hr', 'quote'],
         ['ul', 'ol', 'task'],
@@ -979,16 +974,15 @@
       plugins: [mermaidPlugin],
     });
 
-    if (isSubmitted) {
-      editor.getEditorElements().mdEditor.setAttribute('contenteditable', 'false');
-      editor.getEditorElements().wwEditor.setAttribute('contenteditable', 'false');
-    } else {
-      document.getElementById('save-btn').disabled = false;
-      editor.on('change', () => {
-        clearTimeout(saveTimer);
-        saveTimer = setTimeout(saveCurrentFile, 1500);
-      });
-    }
+    document.getElementById('save-btn').disabled = false;
+    editorDirty = false;
+    editor.on('change', () => {
+      editorDirty = true;
+      refreshSubmitButton();
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveCurrentFile, 1500);
+    });
+
     attachParagraphCommenting();
     renderComments();
   }
@@ -1015,11 +1009,9 @@
 
     document.getElementById('no-file').style.display = 'none';
 
-    const isSubmitted = sessionData?.status === 'submitted';
     // When something moved (two- or three-way), keep the comparison visible as a
     // reference and edit from upstream so the author's changes are never dropped.
-    // On a read-only submitted session there's nothing to reconcile.
-    const hasReference = (data.view === 'two_way' || data.view === 'three_way') && !isSubmitted;
+    const hasReference = data.view === 'two_way' || data.view === 'three_way';
     const editContent = hasReference ? data.upstream : data.content;
 
     if (hasReference) showReference(data);
@@ -1027,15 +1019,20 @@
 
     fileOriginals[filePath] = editContent;
     mountEditor(editContent);
+    refreshSubmitButton();
   }
 
   async function saveCurrentFile() {
-    if (!currentFile || !editor || sessionData?.status !== 'active') return;
+    if (!currentFile || !editor) return;
     const content = editor.getMarkdown();
     const originalContent = fileOriginals[currentFile];
     try {
       await api('PUT', `/files/${encodeURIComponent(currentFile)}`, { content, originalContent });
       markFileEdited(currentFile);
+      const entry = (sessionData?.files || []).find(f => f.path === currentFile);
+      if (entry) { entry.edited = true; entry.dirty = true; }
+      editorDirty = false;
+      refreshSubmitButton();
     } catch (e) {
       showToast('Save failed: ' + e.message, 3000);
       throw e;
@@ -1054,7 +1051,7 @@
       // toast already shown by saveCurrentFile
     } finally {
       btn.textContent = 'Save';
-      btn.disabled = sessionData?.status !== 'active' || !currentFile;
+      btn.disabled = !currentFile;
     }
   }
 
@@ -1107,7 +1104,40 @@
     });
   }
 
+  // The button's label is cosmetic; the server decides Approve vs Submit
+  // changes by whether any file is actually dirty.
+  function hasPendingEdits() {
+    return (sessionData?.files || []).some(f => f.dirty) || editorDirty;
+  }
+
+  function refreshSubmitButton() {
+    const btn = document.getElementById('approve-btn');
+    if (!btn || !sessionData) return;
+    if (hasPendingEdits()) btn.textContent = 'Submit changes';
+    else if (sessionData.approved_at) btn.textContent = 'Approved ✓';
+    else btn.textContent = 'Approve';
+  }
+
+  // Persistent banner linking the current review branch/PR, if one exists.
+  // Stays visible across re-submissions since the link may change (a merged
+  // review PR gets replaced by a new one).
+  function showReviewPrBanner() {
+    const banner = document.getElementById('status-banner');
+    if (sessionData?.submitted_pr_url) {
+      banner.className = 'submitted';
+      banner.innerHTML = `Changes committed → <a href="${sessionData.submitted_pr_url}" target="_blank" rel="noopener">PR #${sessionData.submitted_pr_number}</a> (${sessionData.submitted_branch})`;
+    } else {
+      banner.className = '';
+      banner.textContent = '';
+    }
+  }
+
   async function submit() {
+    // Flush pending editor changes first so the server sees accurate dirty rows.
+    clearTimeout(saveTimer);
+    await saveCurrentFile();
+
+    const pending = hasPendingEdits();
     const unvisited = (sessionData?.files || []).filter(f => !f.visited).map(f => f.path);
 
     let proceed;
@@ -1116,55 +1146,45 @@
         title: "Some files haven't been opened yet",
         message: "You haven't reviewed the following files:",
         fileList: unvisited,
-        warning: '<strong>Once you submit, you will not be able to edit any files.</strong> Do you want to go back and review these files first?',
+        warning: (pending
+          ? 'Commit your changes to the review PR?'
+          : 'Approve this PR on GitHub?') + ' Do you want to go back and review these files first?',
         cancelText: 'Go Back and Review',
-        confirmText: 'Submit Anyway',
+        confirmText: pending ? 'Submit Anyway' : 'Approve Anyway',
       });
     } else {
       proceed = await showConfirmModal({
-        title: 'Submit your review?',
-        warning: '<strong>Once you submit, you will not be able to edit any files.</strong>',
+        title: pending ? 'Submit your changes?' : 'Approve this PR?',
+        warning: pending ? 'Commit your changes to the review PR?' : 'Approve this PR on GitHub?',
         cancelText: 'Cancel',
-        confirmText: 'Submit',
+        confirmText: pending ? 'Submit' : 'Approve',
       });
     }
     if (!proceed) return;
 
-    // Save any pending changes first
-    clearTimeout(saveTimer);
-    await saveCurrentFile();
-
     const btn = document.getElementById('approve-btn');
     btn.disabled = true;
-    btn.textContent = 'Submitting…';
+    btn.textContent = pending ? 'Submitting…' : 'Approving…';
 
     try {
-      await api('POST', '/submit');
-      sessionData.status = 'submitted';
-      showSubmittedState();
-      showToast('Submitted for review', 3000);
+      const result = await api('POST', '/submit');
+      if (result.action === 'approved') {
+        sessionData.approved_at = Date.now();
+        showToast('Approved on GitHub', 3000);
+      } else {
+        sessionData.submitted_branch = result.branch;
+        sessionData.submitted_pr_number = result.pr_number;
+        sessionData.submitted_pr_url = result.pr_url;
+        (sessionData.files || []).forEach(f => { f.dirty = false; });
+        editorDirty = false;
+        showReviewPrBanner();
+        showToast('Changes committed', 3000);
+      }
     } catch (e) {
-      btn.disabled = false;
-      btn.textContent = 'Submit your review';
       showToast('Error: ' + e.message, 4000);
-    }
-  }
-
-  function showSubmittedState() {
-    const btn = document.getElementById('approve-btn');
-    btn.textContent = 'Submitted';
-    btn.disabled = true;
-    btn.classList.add('submitted');
-
-    const banner = document.getElementById('status-banner');
-    banner.className = 'submitted';
-    banner.textContent = 'Your changes have been submitted for review.';
-
-    // Re-open current file as read-only
-    if (currentFile) {
-      const path = currentFile;
-      currentFile = null;
-      openFile(path);
+    } finally {
+      btn.disabled = false;
+      refreshSubmitButton();
     }
   }
 
@@ -1182,16 +1202,14 @@
     document.getElementById('pr-title').textContent = sessionData.pr_title;
 
     renderFileList(sessionData.files);
+    showReviewPrBanner();
 
-    if (sessionData.status === 'submitted') {
-      showSubmittedState();
-    } else {
-      const approveBtn = document.getElementById('approve-btn');
-      approveBtn.disabled = false;
-      approveBtn.addEventListener('click', submit);
-      document.getElementById('save-btn').addEventListener('click', manualSave);
-      document.getElementById('general-comment-btn').disabled = false;
-    }
+    const approveBtn = document.getElementById('approve-btn');
+    approveBtn.disabled = false;
+    approveBtn.addEventListener('click', submit);
+    refreshSubmitButton();
+    document.getElementById('save-btn').addEventListener('click', manualSave);
+    document.getElementById('general-comment-btn').disabled = false;
 
     // Collapse / expand the reference pane.
     document.getElementById('reference-toggle').addEventListener('click', () => {
