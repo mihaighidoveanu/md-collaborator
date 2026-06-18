@@ -16,7 +16,9 @@ const SCHEMA = `
     created_at INTEGER NOT NULL,
     submitted_pr_number INTEGER,
     submitted_pr_url TEXT,
-    submitted_branch TEXT
+    submitted_branch TEXT,
+    approved_at INTEGER,
+    last_action_sha TEXT
   );
 
   CREATE TABLE IF NOT EXISTS file_edits (
@@ -73,6 +75,7 @@ function createDb(dbPath) {
   try { db.exec('ALTER TABLE sessions ADD COLUMN submitted_pr_url TEXT'); } catch {}
   try { db.exec('ALTER TABLE sessions ADD COLUMN submitted_branch TEXT'); } catch {}
   try { db.exec('ALTER TABLE sessions ADD COLUMN approved_at INTEGER'); } catch {}
+  try { db.exec('ALTER TABLE sessions ADD COLUMN last_action_sha TEXT'); } catch {}
   return db;
 }
 

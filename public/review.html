@@ -1113,9 +1113,16 @@
   function refreshSubmitButton() {
     const btn = document.getElementById('approve-btn');
     if (!btn || !sessionData) return;
-    if (hasPendingEdits()) btn.textContent = 'Submit changes';
-    else if (sessionData.approved_at) btn.textContent = 'Approved ✓';
-    else btn.textContent = 'Approve';
+    if (hasPendingEdits()) {
+      btn.disabled = false;
+      btn.textContent = 'Submit changes';
+    } else if (sessionData.settled) {
+      btn.disabled = true;
+      btn.textContent = 'No pending changes';
+    } else {
+      btn.disabled = false;
+      btn.textContent = 'Approve';
+    }
   }
 
   // Persistent banner linking the current review branch/PR, if one exists.
@@ -1125,9 +1132,16 @@
   // were saved and handed to the development team.
   function showReviewPrBanner() {
     const banner = document.getElementById('status-banner');
+    banner.innerHTML = '';
     if (sessionData?.submitted_pr_url) {
       banner.className = 'submitted';
-      banner.innerHTML = `Your edits have been sent to the development team for implementation. <a href="${sessionData.submitted_pr_url}" target="_blank" rel="noopener">View details</a>`;
+      banner.append('Your edits have been sent to the development team for implementation. ');
+      const link = document.createElement('a');
+      link.href = sessionData.submitted_pr_url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = 'View details';
+      banner.append(link);
     } else {
       banner.className = '';
       banner.textContent = '';
@@ -1174,11 +1188,13 @@
       const result = await api('POST', '/submit');
       if (result.action === 'approved') {
         sessionData.approved_at = Date.now();
+        sessionData.settled = true;
         showToast('Approval sent to the developers', 3000);
       } else {
         sessionData.submitted_branch = result.branch;
         sessionData.submitted_pr_number = result.pr_number;
         sessionData.submitted_pr_url = result.pr_url;
+        sessionData.settled = true;
         (sessionData.files || []).forEach(f => { f.dirty = false; });
         editorDirty = false;
         showReviewPrBanner();

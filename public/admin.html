@@ -173,7 +173,7 @@
               ? `<button class="danger" onclick="revoke('${s.id}')">Revoke</button>`
               : ''}
             ${s.submitted_pr_url
-              ? `<a href="${s.submitted_pr_url}" target="_blank" style="color:#0366d6;font-size:12px">Review PR #${s.submitted_pr_number}</a>`
+              ? `<a href="${escHtml(s.submitted_pr_url)}" target="_blank" style="color:#0366d6;font-size:12px">Review PR #${escHtml(String(s.submitted_pr_number))}</a>`
               : ''}
           </td>
         </tr>

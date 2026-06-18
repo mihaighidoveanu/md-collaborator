@@ -34,7 +34,7 @@ function buildPrBody(session, comments) {
 
 function createReviewRouter({ db, github }) {
   const router = express.Router();
-  const { requireSession, requireActiveOrSubmitted } = createSessionMiddleware(db);
+  const { requireSession, requireNotRevoked } = createSessionMiddleware(db);
 
   // Short-lived cache of a PR's reviewable file set. A reviewer opens many files
   // in a sitting and each open re-validates membership; without this every open
@@ -60,7 +60,7 @@ function createReviewRouter({ db, github }) {
   });
 
   // Session metadata + file list
-  router.get('/api/:token', requireActiveOrSubmitted, async (req, res) => {
+  router.get('/api/:token', requireNotRevoked, async (req, res) => {
     const { session } = req;
     try {
       const prFiles = await reviewableFiles(session);
@@ -79,6 +79,17 @@ function createReviewRouter({ db, github }) {
         dirty: dirtyPaths.has(f.filename),
         visited: visitedPaths.has(f.filename),
       }));
+
+      // "Settled": the reviewer's last action (approve or commit-submit) still
+      // reflects the current state of the target branch — nothing to act on
+      // again yet. Best-effort: a blip leaves it unsettled (button stays clickable)
+      // rather than getting stuck disabled.
+      let settled = false;
+      try {
+        const liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, session.head_branch);
+        settled = !!session.last_action_sha && liveHeadSha === session.last_action_sha;
+      } catch {}
+
       res.json({
         pr_number: session.pr_number,
         pr_title: session.pr_title,
@@ -89,6 +100,7 @@ function createReviewRouter({ db, github }) {
         submitted_pr_number: session.submitted_pr_number,
         submitted_pr_url: session.submitted_pr_url,
         approved_at: session.approved_at,
+        settled,
         files,
       });
     } catch (err) {
@@ -99,7 +111,7 @@ function createReviewRouter({ db, github }) {
   // Get file content, change-aware: surfaces what moved upstream since the
   // reviewer last looked at this file (two-way diff). Three-way reconciliation
   // for files the reviewer has also edited is layered on in a later phase.
-  router.get('/api/:token/files/*', requireActiveOrSubmitted, async (req, res) => {
+  router.get('/api/:token/files/*', requireNotRevoked, async (req, res) => {
     const { session } = req;
     const filePath = req.params[0];
 
@@ -259,7 +271,17 @@ function createReviewRouter({ db, github }) {
           session.owner, session.repo, session.pr_number,
           buildApprovalBody(session)
         );
-        db.prepare('UPDATE sessions SET approved_at = ? WHERE id = ?').run(Date.now(), session.id);
+        // Pin the "settled" reference to the target branch's head right now, so
+        // the button stays disabled only until the target branch actually moves.
+        // The approval already succeeded above; a blip here must not turn that
+        // into a reported failure — fall back to null ("settled" unknown/false).
+        let settledSha = null;
+        try {
+          settledSha = await withRetry(() =>
+            github.getCurrentHeadSha(session.owner, session.repo, session.head_branch));
+        } catch {}
+        db.prepare('UPDATE sessions SET approved_at = ?, last_action_sha = ? WHERE id = ?')
+          .run(Date.now(), settledSha, session.id);
         return res.json({ ok: true, action: 'approved', review_url: review.html_url });
       } catch (err) {
         return res.status(500).json({ error: err.message }); // session unchanged
@@ -296,9 +318,11 @@ function createReviewRouter({ db, github }) {
     let createdBranchThisCall = null;
     try {
       let baseSha;
+      let targetHeadSha;
       if (needNewBranch) {
         baseSha = await withRetry(() =>
           github.getCurrentHeadSha(session.owner, session.repo, session.head_branch));
+        targetHeadSha = baseSha; // branching off the target's head — same value
         branch = await github.createBranch(
           session.owner, session.repo,
           `review/pr${session.pr_number}-${session.token.slice(0, 8)}`, baseSha);
@@ -306,9 +330,13 @@ function createReviewRouter({ db, github }) {
       } else {
         baseSha = await withRetry(() =>
           github.getCurrentHeadSha(session.owner, session.repo, branch));
+        // Reads compare base_sha against the TARGET branch's head (see GET
+        // /files/*), not the review branch's — fetch it separately here.
+        targetHeadSha = await withRetry(() =>
+          github.getCurrentHeadSha(session.owner, session.repo, session.head_branch));
       }
 
-      const commitSha = await github.commitChanges(
+      await github.commitChanges(
         session.owner, session.repo, branch, baseSha,
         dirtyFiles.map(f => ({
           filePath: f.file_path,
@@ -327,15 +355,20 @@ function createReviewRouter({ db, github }) {
       }
 
       // Persist current review branch/PR (overwrite — they are "current", not one-shot).
+      // last_action_sha is pinned to the same target-branch head used for base_sha
+      // below, so the button settles iff nothing has moved upstream since this round.
       db.prepare(`UPDATE sessions
-         SET submitted_branch = ?, submitted_pr_number = ?, submitted_pr_url = ?
-         WHERE id = ?`).run(branch, prNumber, prUrl, session.id);
+         SET submitted_branch = ?, submitted_pr_number = ?, submitted_pr_url = ?, last_action_sha = ?
+         WHERE id = ?`).run(branch, prNumber, prUrl, targetHeadSha, session.id);
 
-      // D3 — advance baselines so the next round starts clean.
+      // D3 — advance baselines so the next round starts clean. base_sha must
+      // track the TARGET branch's head (what reads compare against), not the
+      // review branch's commit — otherwise every committed file looks
+      // permanently "drifted" against its own unrelated target-branch content.
       const advance = db.prepare(`UPDATE file_edits
          SET dirty = 0, original_content = content, base_sha = ?
          WHERE session_id = ? AND file_path = ?`);
-      for (const f of dirtyFiles) advance.run(commitSha, session.id, f.file_path);
+      for (const f of dirtyFiles) advance.run(targetHeadSha, session.id, f.file_path);
 
       // status stays 'active' (D4) — never set 'submitted'.
       res.json({ ok: true, action: 'submitted', pr_number: prNumber, pr_url: prUrl, branch });
@@ -349,9 +382,9 @@ function createReviewRouter({ db, github }) {
 
   // --- Comments (anchored to a paragraph, or free) ---
 
-  // List the session's comments. Readable on an active or submitted session so
-  // they remain visible after the review is submitted.
-  router.get('/api/:token/comments', requireActiveOrSubmitted, (req, res) => {
+  // List the session's comments. Readable on any non-revoked session so they
+  // remain visible across any number of submit rounds.
+  router.get('/api/:token/comments', requireNotRevoked, (req, res) => {
     const rows = db.prepare(
       `SELECT ${COMMENT_COLS} FROM comments WHERE session_id = ? ORDER BY created_at`
     ).all(req.session.id);

@@ -307,6 +307,7 @@ test('R9.3 submitting with no pending edits approves the original PR, opening no
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
   assert.equal(meta.json.status, 'active', 'the session is never locked');
+  assert.equal(meta.json.settled, true, 'nothing has moved upstream since the approval');
 
   // The business can subsequently edit and submit changes after an approval.
   await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
@@ -524,6 +525,103 @@ test('R20.2 a commit failure on a re-submit (B1) leaves the reused branch intact
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
   assert.equal(meta.json.status, 'active');
+});
+
+test('after a commit-submit (first submit), re-opening the file with no further edits stays plain', async () => {
+  active = await setup();
+  const { ctx, session } = active;
+  const p = filePath('docs/intro.md');
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${p}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+  await ctx.request('POST', `/review/api/${session.token}/submit`);
+
+  // The target branch never received this commit (it went to the review
+  // branch), so re-reading must not compare the new baseline against the
+  // target branch's stale, unrelated old content and report a fake conflict.
+  const res = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
+  assert.equal(res.json.view, 'plain', 'the committed baseline does not look drifted against itself');
+  assert.equal(res.json.content, '# Intro\nedited\n');
+});
+
+test('after a re-submit on a reused review branch (B1), re-opening the file with no further edits stays plain', async () => {
+  active = await setupWithReviewPr();
+  const { ctx, session } = active;
+  const p = filePath('docs/intro.md');
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${p}`,
+    { body: { content: '# Intro\nsecond round\n', originalContent: '# Intro\nhello\n' } });
+  await ctx.request('POST', `/review/api/${session.token}/submit`);
+
+  const res = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
+  assert.equal(res.json.view, 'plain', 'the committed baseline does not look drifted against itself');
+  assert.equal(res.json.content, '# Intro\nsecond round\n');
+});
+
+test('after a commit-submit, a later real upstream move is still detected as drift', async () => {
+  active = await setup();
+  const { ctx, github, session } = active;
+  const p = filePath('docs/intro.md');
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${p}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+  await ctx.request('POST', `/review/api/${session.token}/submit`);
+
+  // The developer pushes a real change to the original PR branch afterward.
+  github.pushCommit('acme', 'docs', 'feature', 'sha-after-submit', { 'docs/intro.md': '# Intro\ndeveloper change\n' });
+
+  const res = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
+  assert.equal(res.json.view, 'three_way', 'a genuine upstream move after the commit is still reconciled, not masked');
+  assert.equal(res.json.upstream, '# Intro\ndeveloper change\n');
+});
+
+// "Settled": the submit button disables ("No pending changes") only once the
+// reviewer's last action (approve or commit-submit) still matches the current
+// state of the target branch — re-enabling the moment anything moves upstream.
+
+test('a session that has never been acted on is not settled', async () => {
+  active = await setup();
+  const { ctx, session } = active;
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.settled, false);
+});
+
+test('settled after a commit-submit with no further upstream movement', async () => {
+  active = await setup();
+  const { ctx, session } = active;
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+  await ctx.request('POST', `/review/api/${session.token}/submit`);
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.settled, true, 'nothing has moved upstream since this commit-submit');
+});
+
+test('no longer settled once the target branch moves after a commit-submit', async () => {
+  active = await setup();
+  const { ctx, github, session } = active;
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+  await ctx.request('POST', `/review/api/${session.token}/submit`);
+
+  github.pushCommit('acme', 'docs', 'feature', 'sha-after-submit', { 'docs/intro.md': '# Intro\ndeveloper change\n' });
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.settled, false, 'the target branch moved since the last action — there is something new to look at');
+});
+
+test('no longer settled once the target branch moves after an approval', async () => {
+  active = await setup();
+  const { ctx, github, session } = active;
+
+  await ctx.request('POST', `/review/api/${session.token}/submit`); // no pending edits -> approve
+  github.pushCommit('acme', 'docs', 'feature', 'sha-after-approve', { 'docs/intro.md': '# Intro\ndeveloper change\n' });
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.settled, false, 'the target branch moved since the approval');
 });
 
 // REQ-13 — A revoked link grants no access.
