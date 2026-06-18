@@ -1120,12 +1120,14 @@
 
   // Persistent banner linking the current review branch/PR, if one exists.
   // Stays visible across re-submissions since the link may change (a merged
-  // review PR gets replaced by a new one).
+  // review PR gets replaced by a new one). Plain language: the reviewer
+  // doesn't need to know what a "PR" or branch is, just that their edits
+  // were saved and handed to the development team.
   function showReviewPrBanner() {
     const banner = document.getElementById('status-banner');
     if (sessionData?.submitted_pr_url) {
       banner.className = 'submitted';
-      banner.innerHTML = `Changes committed → <a href="${sessionData.submitted_pr_url}" target="_blank" rel="noopener">PR #${sessionData.submitted_pr_number}</a> (${sessionData.submitted_branch})`;
+      banner.innerHTML = `Your changes have been committed — saved permanently and sent to the development team for review. <a href="${sessionData.submitted_pr_url}" target="_blank" rel="noopener">View on GitHub</a>`;
     } else {
       banner.className = '';
       banner.textContent = '';
@@ -1147,15 +1149,17 @@
         message: "You haven't reviewed the following files:",
         fileList: unvisited,
         warning: (pending
-          ? 'Commit your changes to the review PR?'
-          : 'Approve this PR on GitHub?') + ' Do you want to go back and review these files first?',
+          ? 'Your edits will be committed — saved permanently and sent to the development team for review.'
+          : 'This posts your approval on GitHub with no changes.') + ' Do you want to go back and review these files first?',
         cancelText: 'Go Back and Review',
         confirmText: pending ? 'Submit Anyway' : 'Approve Anyway',
       });
     } else {
       proceed = await showConfirmModal({
-        title: pending ? 'Submit your changes?' : 'Approve this PR?',
-        warning: pending ? 'Commit your changes to the review PR?' : 'Approve this PR on GitHub?',
+        title: pending ? 'Submit your changes?' : 'Approve this review?',
+        warning: pending
+          ? 'Your edits will be committed — saved permanently and sent to the development team for review.'
+          : 'This posts your approval on GitHub with no changes.',
         cancelText: 'Cancel',
         confirmText: pending ? 'Submit' : 'Approve',
       });
