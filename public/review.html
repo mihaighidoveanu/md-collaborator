@@ -115,14 +115,25 @@
     }
     #editor-area.reconcile #reference-panel.collapsed { width: auto; min-width: 0; }
     #reference-panel.collapsed #reference-label { display: none; }
-    .tw-note {
-      padding: 4px 12px;
-      font-size: 12px;
-      color: #22863a;
-      background: #e6ffed;
-      border-bottom: 1px solid #f3f4f6;
+    .tw-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 12px; background: #f6f8fa; border-bottom: 1px solid #e1e4e8; }
+    .tw-legend .tw-key {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 11px;
+      color: #57606a;
+      display: inline-flex;
+      align-items: center;
     }
-    .tw-note.conflict { color: #9a6700; background: #fff8e6; }
+    .tw-legend .tw-key::before {
+      content: '';
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      margin-right: 5px;
+      border: 1px solid rgba(27,31,35,0.15);
+    }
+    .tw-legend .tw-key.your::before { background: #e6ffed; }
+    .tw-legend .tw-key.author::before { background: #ddf4ff; }
+    .tw-legend .tw-key.conflict::before { background: #ffe1b3; }
     #reference-header {
       display: flex;
       align-items: center;
@@ -194,7 +205,8 @@
     .tw-cell:last-child { border-right: none; }
     .tw-cell.empty { background: #fafbfc; }
     .tw-cell.changed { background: #e6ffed; }
-    .tw-row.conflict .tw-cell.changed { background: #ffe9b3; }
+    .tw-cell.upstream { background: #ddf4ff; }
+    .tw-row.conflict .tw-cell.changed, .tw-row.conflict .tw-cell.upstream { background: #ffe1b3; }
 
     #status-banner {
       display: none;
@@ -491,11 +503,24 @@
   }
 
   // Build the reconcile reference: two columns (Original | Your edits) the
-  // reviewer re-applies onto the upstream content shown in the editor. The
-  // Upstream column is dropped — the editor already shows it — but conflict
-  // awareness is kept: rows both sides changed are flagged, and the author's
-  // clashing line is shown inline so it isn't lost.
+  // reviewer re-applies onto the upstream content shown in the editor. Color,
+  // not text, carries the signal — a small legend explains it:
+  //   • Your edits cell highlighted  → you changed this line
+  //   • Original cell highlighted    → the author changed it upstream (the
+  //                                     editor on the right has the new version)
+  //   • whole row amber              → conflict: you both changed this line
   function buildThreeWay(container, rows) {
+    const legend = document.createElement('div');
+    legend.className = 'tw-legend';
+    [['your', 'Your change'], ['author', 'Author changed upstream'], ['conflict', 'Conflict (both)']]
+      .forEach(([cls, text]) => {
+        const key = document.createElement('span');
+        key.className = 'tw-key ' + cls;
+        key.textContent = text;
+        legend.appendChild(key);
+      });
+    container.appendChild(legend);
+
     const head = document.createElement('div');
     head.id = 'threeway-head';
     ['Original', 'Your edits (re-apply)'].forEach(label => {
@@ -505,36 +530,20 @@
       head.appendChild(col);
     });
     container.appendChild(head);
+
     rows.forEach(r => {
       const row = document.createElement('div');
       row.className = 'tw-row' + (r.conflict ? ' conflict' : '');
-      const cell = (text, changed) => {
+      const cell = (text, extraClass) => {
         const c = document.createElement('div');
-        c.className = 'tw-cell' + (text === null ? ' empty' : '') + (changed ? ' changed' : '');
+        c.className = 'tw-cell' + (text === null ? ' empty' : '') + (extraClass ? ' ' + extraClass : '');
         c.textContent = text === null ? '' : text;
         return c;
       };
-      row.appendChild(cell(r.base, false));
-      row.appendChild(cell(r.mine, r.mineChanged));
+      // Original cell flags an upstream change; Your-edits cell flags your change.
+      row.appendChild(cell(r.base, r.upstreamChanged ? 'upstream' : ''));
+      row.appendChild(cell(r.mine, r.mineChanged ? 'changed' : ''));
       container.appendChild(row);
-      // Surface what the author changed upstream since the reviewer's last view —
-      // for every upstream change, not only conflicts — so additions aren't lost.
-      if (r.upstreamChanged) {
-        const note = document.createElement('div');
-        note.className = 'tw-note' + (r.conflict ? ' conflict' : '');
-        let msg;
-        if (r.conflict) {
-          msg = '⚠ You both changed this line. The author’s version: ' + (r.upstream === null ? '(removed)' : r.upstream);
-        } else if (r.base === null) {
-          msg = 'The author added since your last view: ' + r.upstream;
-        } else if (r.upstream === null) {
-          msg = 'The author removed this line since your last view.';
-        } else {
-          msg = 'The author changed this since your last view: ' + r.upstream;
-        }
-        note.textContent = msg;
-        container.appendChild(note);
-      }
     });
   }
 
@@ -550,7 +559,7 @@
     if (data.view === 'three_way') {
       // Side-by-side reconcile: reference left, editor (upstream) right.
       area.classList.add('reconcile');
-      label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) in the editor; the author’s changes since your last view are noted inline.';
+      label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) in the editor; colors mark your changes, the author’s upstream changes, and conflicts (see legend).';
       buildThreeWay(body, data.diff || []);
     } else {
       // Informational "what moved", stacked above the editor.
