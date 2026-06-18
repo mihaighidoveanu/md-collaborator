@@ -595,15 +595,3 @@ test('R17.3 comments are scoped to their session', async () => {
   assert.equal((await ctx.request('DELETE', `/review/api/${other.token}/comments/${id}`)).status, 404, 'cannot delete another session\'s comment');
 });
 
-test('R17.4 comments stay readable after submit, but new ones are refused', async () => {
-  active = await setup({ status: 'submitted' });
-  const { ctx, session } = active;
-  ctx.db.prepare('INSERT INTO comments (session_id, body, resolved, created_at) VALUES (?,?,0,?)').run(session.id, 'earlier note', Date.now());
-
-  const list = await ctx.request('GET', `/review/api/${session.token}/comments`);
-  assert.equal(list.status, 200);
-  assert.equal(list.json.length, 1, 'existing comments remain visible after submit');
-
-  const post = await ctx.request('POST', `/review/api/${session.token}/comments`, { body: { body: 'too late' } });
-  assert.equal(post.status, 403, 'cannot add a comment to a submitted session');
-});

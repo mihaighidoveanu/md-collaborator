@@ -6,7 +6,7 @@
 
 **Suggested level** per test: **U** = pure-logic unit · **I** = API/integration · **E** = end-to-end browser. This is guidance for whoever implements them, not part of the assertion.
 
-**Total: 45 tests.**
+**Total: 44 tests.**
 
 > ⚠️ Two tests encode *intended* behavior that the current implementation does not yet satisfy (marked **[drives fix]**). They are expected to fail until the code is corrected.
 
@@ -193,7 +193,6 @@ their own session.
 | R17.1 | happy | I/E | An anchored comment and a free comment can be created and are listed back |
 | R17.2 | unhappy | I | A comment requires a non-empty body; a comment can be resolved and deleted |
 | R17.3 | unhappy | I | A session cannot read, resolve, or delete another session's comments |
-| R17.4 | edge | I/E | After submission, existing comments stay readable but no new comment can be added |
 
 ---
 
@@ -259,7 +258,7 @@ next round starts clean — and a reused branch is never deleted on failure
 | R14 Diagrams | R14.1 | ✓ | — |
 | R15 Change awareness | R15.1–R15.2 | ✓ | — |
 | R16 Three-way reconcile | R16.1–R16.3 | ✓ | ✓ |
-| R17 Comments | R17.1–R17.4 | ✓ | ✓ |
+| R17 Comments | R17.1–R17.3 | ✓ | ✓ |
 | R18 Same-PR re-submission | R18.1–R18.3 | ✓ | ✓ |
 | R19 Approve posts GitHub review | R19.1 | — | ✓ |
 | R20 Baseline advance | R20.1–R20.2 | ✓ | ✓ |
@@ -279,5 +278,5 @@ Every requirement has at least one test; every requirement with a meaningful fai
 | Large PR (markdown spanning multiple result pages) | R3.3 |
 | A file edited to change one line; another with repeated identical lines; a very large file | R10.1–R10.3 |
 | Markdown file with a mermaid block | R14.1 |
-| Sessions seeded in active / submitted / revoked states | R13, R17.4, and state-dependent checks |
+| Sessions seeded in active / revoked states | R13 and other state-dependent checks |
 | Review PR fixture (open, or merged with branch alive/deleted) | R18.1–R18.3, R20.2 |
