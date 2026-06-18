@@ -384,21 +384,20 @@ else:                btn.textContent = 'Approve'
 
 - **Remove** `showSubmittedState()`'s locking behavior. After a `submitted`
   response: keep the editor editable, show a **persistent banner** linking
-  `submitted_pr_url`. The business reviewer doesn't know what a "PR" or branch
-  is, so the banner avoids that vocabulary and instead explains the action in
-  plain terms, e.g. `Your changes have been committed — saved permanently and
-  sent to the development team for review. [View on GitHub]`. Then
-  `refreshSubmitButton()` (baselines advanced ⇒ reverts to "Approve").
-- After an `approved` response: toast "Approved on GitHub", set `approved_at`
-  locally, `refreshSubmitButton()` → "Approved ✓".
+  `submitted_pr_url`. The business reviewer doesn't know what a "PR", branch,
+  or "commit" is, so the banner names none of that and instead states the
+  outcome plainly, e.g. `Your edits have been sent to the development team for
+  implementation. [View on GitHub]`. Then `refreshSubmitButton()` (baselines
+  advanced ⇒ reverts to "Approve").
+- After an `approved` response: toast "Approval sent to the developers", set
+  `approved_at` locally, `refreshSubmitButton()` → "Approved ✓".
 - The confirm modal copy that says *"Once you submit, you will not be able to edit
   any files."* is now **false** — replace with copy that names no GitHub
-  jargon ("PR", branch) and instead explains what "commit" means for a
-  non-technical reviewer, e.g. *"Your edits will be committed — saved
-  permanently and sent to the development team for review."* for the edits
-  case; *"This posts your approval on GitHub with no changes."* for the
-  approve case (title: "Approve this review?", not "Approve this PR?"). The
-  unopened-files warning can stay for both cases.
+  jargon ("PR", branch, "commit") and just states the outcome, e.g. *"Your
+  edits will be sent to the development team for implementation."* for the
+  edits case; *"This sends your approval to the developers with no
+  changes."* for the approve case (title: "Approve this review?", not
+  "Approve this PR?"). The unopened-files warning can stay for both cases.
 - `init()`: drop the `status === 'submitted'` terminal branch; always wire up the
   editable controls. Surface the review-PR banner if `submitted_pr_url` is present.
 

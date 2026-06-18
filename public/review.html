@@ -1127,7 +1127,7 @@
     const banner = document.getElementById('status-banner');
     if (sessionData?.submitted_pr_url) {
       banner.className = 'submitted';
-      banner.innerHTML = `Your changes have been committed — saved permanently and sent to the development team for review. <a href="${sessionData.submitted_pr_url}" target="_blank" rel="noopener">View on GitHub</a>`;
+      banner.innerHTML = `Your edits have been sent to the development team for implementation. <a href="${sessionData.submitted_pr_url}" target="_blank" rel="noopener">View on GitHub</a>`;
     } else {
       banner.className = '';
       banner.textContent = '';
@@ -1149,8 +1149,8 @@
         message: "You haven't reviewed the following files:",
         fileList: unvisited,
         warning: (pending
-          ? 'Your edits will be committed — saved permanently and sent to the development team for review.'
-          : 'This posts your approval on GitHub with no changes.') + ' Do you want to go back and review these files first?',
+          ? 'Your edits will be sent to the development team for implementation.'
+          : 'This sends your approval to the developers with no changes.') + ' Do you want to go back and review these files first?',
         cancelText: 'Go Back and Review',
         confirmText: pending ? 'Submit Anyway' : 'Approve Anyway',
       });
@@ -1158,8 +1158,8 @@
       proceed = await showConfirmModal({
         title: pending ? 'Submit your changes?' : 'Approve this review?',
         warning: pending
-          ? 'Your edits will be committed — saved permanently and sent to the development team for review.'
-          : 'This posts your approval on GitHub with no changes.',
+          ? 'Your edits will be sent to the development team for implementation.'
+          : 'This sends your approval to the developers with no changes.',
         cancelText: 'Cancel',
         confirmText: pending ? 'Submit' : 'Approve',
       });
@@ -1174,7 +1174,7 @@
       const result = await api('POST', '/submit');
       if (result.action === 'approved') {
         sessionData.approved_at = Date.now();
-        showToast('Approved on GitHub', 3000);
+        showToast('Approval sent to the developers', 3000);
       } else {
         sessionData.submitted_branch = result.branch;
         sessionData.submitted_pr_number = result.pr_number;
@@ -1182,7 +1182,7 @@
         (sessionData.files || []).forEach(f => { f.dirty = false; });
         editorDirty = false;
         showReviewPrBanner();
-        showToast('Changes committed', 3000);
+        showToast('Edits sent for implementation', 3000);
       }
     } catch (e) {
       showToast('Error: ' + e.message, 4000);

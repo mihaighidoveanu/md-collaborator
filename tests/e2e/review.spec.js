@@ -66,7 +66,7 @@ test('submit button flips Approve/Submit changes; a commit shows a persistent ba
   await expect(page.locator('#confirm-modal-title')).toHaveText('Submit your changes?');
   await page.locator('#confirm-modal-confirm').click();
 
-  await expect(page.locator('#status-banner')).toContainText('committed');
+  await expect(page.locator('#status-banner')).toContainText('sent to the development team');
   const firstLink = page.locator('#status-banner a');
   const firstHref = await firstLink.getAttribute('href');
   expect(firstHref).toMatch(/\/pull\/1000$/);
@@ -83,7 +83,7 @@ test('submit button flips Approve/Submit changes; a commit shows a persistent ba
 
   await approveBtn.click();
   await page.locator('#confirm-modal-confirm').click();
-  await expect(page.locator('#status-banner')).toContainText('committed');
+  await expect(page.locator('#status-banner')).toContainText('sent to the development team');
   await expect(page.locator('#status-banner a')).toHaveAttribute('href', firstHref);
 });
 
@@ -100,6 +100,6 @@ test('clicking Approve with no pending edits posts a GitHub approval', async ({ 
   await expect(page.locator('#confirm-modal-title')).toHaveText('Approve this review?');
   await page.locator('#confirm-modal-confirm').click();
 
-  await expect(page.locator('#toast')).toContainText('Approved on GitHub');
+  await expect(page.locator('#toast')).toContainText('Approval sent to the developers');
   await expect(approveBtn).toHaveText('Approved ✓');
 });
