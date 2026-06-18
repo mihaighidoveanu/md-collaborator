@@ -141,10 +141,11 @@ CREATE TABLE IF NOT EXISTS comments (
 ```
 
 Anchoring strategy: store **both** `paragraph_index` (fast path) and
-`anchor_text` (the paragraph's text, for *re‑anchoring* when paragraphs shift).
-On render, try `paragraph_index`; if that paragraph's text no longer matches
-`anchor_text`, fall back to locating the paragraph whose text equals
-`anchor_text`; if neither matches, render the comment as **"detached"** in the
+`anchor_text` (the paragraph's text, for re‑anchoring when paragraphs shift).
+On render, try `paragraph_index`; if that paragraph's text no longer **exactly**
+matches `anchor_text`, fall back to locating the paragraph whose text **equals**
+`anchor_text` (an exact text match, not approximate); if neither matches,
+render the comment as **"detached"** in the
 panel (still visible, just not pinned). Keep this logic in the browser.
 
 ---
@@ -365,8 +366,9 @@ conflict).
 ### 6.4 Read‑only after submit
 
 When `status === 'submitted'`: editor read‑only (reuse the existing
-contenteditable=false path), diff/3‑way panels still viewable, comments
-viewable but composer hidden, Submit button shows "Submitted".
+contenteditable=false path); the reference (diff/3‑way) pane is **not** shown —
+there is nothing to reconcile on a locked session; comments stay viewable but
+the composer and per‑comment actions are hidden; Submit button shows "Submitted".
 
 ---
 
