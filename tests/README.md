@@ -64,13 +64,39 @@ The E2E specs cover behaviors that only exist in the browser and load the editor
 | R12.2| re-approving refused                       | I | integration/review.test.js |
 | R13.1| revoked link grants no access             | I | integration/review.test.js |
 | R14.1| mermaid renders, not raw code             | E | e2e/review.spec.js |
+| R15.1| unchanged upstream opens plain, no refetch| I | integration/review.test.js |
+| R15.2| seen file + upstream move → two-way diff  | I | integration/review.test.js |
+| R16.1| edit + upstream drift → three-way, conflict flagged | I | integration/review.test.js |
+| R16.2| non-overlapping edits → three-way, no conflict | I | integration/review.test.js |
+| R16.3| edit + no upstream drift stays plain      | I | integration/review.test.js |
+| R17.1| anchored + free comments created & listed | I | integration/review.test.js |
+| R17.2| comment requires a body; resolve & delete | I | integration/review.test.js |
+| R17.3| comments scoped to their own session      | I | integration/review.test.js |
+| R9.1 | submit with edits: one branch/commit/PR; session stays active | I/E | integration/review.test.js, e2e/review.spec.js |
+| R9.2 | several edited files → one commit          | I | integration/review.test.js |
+| R9.3 | submit with no edits approves instead      | I/E | integration/review.test.js, e2e/review.spec.js |
+| R18.1| (B1) open review PR: reuse branch + PR     | I | integration/review.test.js |
+| R18.2| (B2) merged PR, branch alive: reuse branch, new PR | I | integration/review.test.js |
+| R18.3| (B3) merged PR, branch deleted: new branch + PR | I | integration/review.test.js |
+| R19.1| a failed approval leaves the session unchanged | I/E | integration/review.test.js, e2e/review.spec.js |
+| R20.1| commit-submit clears dirty; next no-edit submit approves | I | integration/review.test.js |
+| R20.2| a commit failure on a reused branch (B1) never deletes it | I | integration/review.test.js |
 
 ## Code corrections driven by these tests
 
-The spec flagged three behaviors the implementation did not yet satisfy
-(plus one related gap), now fixed:
+The spec flagged behaviors the implementation did not yet satisfy, now fixed:
 
 - **R4.1** — admin session listing now returns `token` so the link opens the session.
 - **R6.3** — file reads are restricted to the session's reviewable file set.
 - **R9.3** — approving with no edits closes the session cleanly, committing nothing.
 - **R2.3** — session creation now refuses a PR with no reviewable markdown.
+- **R19** — `submit()`/`openFile()` in `public/review.html` unconditionally
+  flushed the open file to the server before checking for pending edits.
+  Since the PUT route always marks a file `dirty=1`, this made "Approve"
+  unreachable through the real UI whenever a file was open (i.e. always —
+  one auto-opens on load). Both call sites now only save when there are
+  actual unsaved keystrokes (`editorDirty`).
+- `fakeGithub.js`'s `createPullRequest` did not register the new PR (and
+  `commitChanges` did not advance the branch's tracked head SHA), so a
+  second real submit through the fake — exactly what re-submission e2e
+  coverage needs — threw 404 on `getPRState`. Both are now tracked.

@@ -76,6 +76,9 @@ function createFakeGithub(config = {}) {
       if (config.commitShouldFail) throw new Error('GitHub commit failed');
       const sha = 'commit-' + (calls.commitChanges.length + 1);
       calls.commitChanges.push({ owner, repo, branch, headSha, editedFiles, sha });
+      // A commit always advances the branch ref, so later getCurrentHeadSha
+      // calls against this branch (e.g. a re-submit) see the new head.
+      headShas[`${owner}/${repo}@${branch}`] = sha;
       return sha;
     },
 
@@ -100,6 +103,9 @@ function createFakeGithub(config = {}) {
       const number = 1000 + calls.createPullRequest.length;
       const html_url = `https://github.com/${owner}/${repo}/pull/${number}`;
       calls.createPullRequest.push({ owner, repo, head, base, title, body, number, html_url });
+      // Register the new PR so a later re-submit's getPRState/branchExists
+      // calls against it (e.g. B1 reuse) find it, mirroring real GitHub.
+      prs[key(owner, repo, number)] = { state: 'open', merged: false, head: { ref: head, sha: headShas[`${owner}/${repo}@${head}`] } };
       return { number, html_url };
     },
 

@@ -72,8 +72,11 @@ test('submit button flips Approve/Submit changes; a commit shows a persistent ba
   expect(firstHref).toMatch(/\/pull\/1000$/);
 
   // The editor is never locked: the file stays open and editable after a commit.
+  // Nothing has moved upstream since this commit, so the session is "settled"
+  // and the button shows there's nothing pending rather than "Approve".
   await expect(editor).toBeVisible();
-  await expect(approveBtn).toHaveText('Approve');
+  await expect(approveBtn).toHaveText('No pending changes');
+  await expect(approveBtn).toBeDisabled();
 
   // A second edit flips the label back, and re-submitting lands on the same PR (B1).
   await editor.click();
@@ -101,5 +104,8 @@ test('clicking Approve with no pending edits posts a GitHub approval', async ({ 
   await page.locator('#confirm-modal-confirm').click();
 
   await expect(page.locator('#toast')).toContainText('Approval sent to the developers');
-  await expect(approveBtn).toHaveText('Approved ✓');
+  // Nothing has moved upstream since this approval, so the session is
+  // "settled" and the button shows there's nothing pending to act on.
+  await expect(approveBtn).toHaveText('No pending changes');
+  await expect(approveBtn).toBeDisabled();
 });

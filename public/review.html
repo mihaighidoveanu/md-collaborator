@@ -993,8 +993,9 @@
     // An open composer belongs to the file being left; close it on switch.
     closeComposer();
 
-    // Save pending changes for previous file before switching
-    if (currentFile && editor) {
+    // Save pending changes for previous file before switching, but only if
+    // it actually has unsaved keystrokes (see the same note in submit()).
+    if (currentFile && editor && editorDirty) {
       clearTimeout(saveTimer);
       await saveCurrentFile();
     }
@@ -1149,9 +1150,13 @@
   }
 
   async function submit() {
-    // Flush pending editor changes first so the server sees accurate dirty rows.
+    // Flush pending editor keystrokes first so the server sees accurate dirty
+    // rows. Only when there's something unsaved — saving unconditionally would
+    // PUT the open file even with zero changes, and the server marks dirty=1
+    // on every PUT, which would make "Approve" unreachable whenever a file
+    // happens to be open (i.e. always, since one auto-opens).
     clearTimeout(saveTimer);
-    await saveCurrentFile();
+    if (editorDirty) await saveCurrentFile();
 
     const pending = hasPendingEdits();
     const unvisited = (sessionData?.files || []).filter(f => !f.visited).map(f => f.path);

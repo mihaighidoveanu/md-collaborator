@@ -12,7 +12,9 @@ module.exports = defineConfig({
   testDir: './tests/e2e',
   testMatch: /.*\.spec\.js/,
   timeout: 30000,
-  use: { baseURL: `http://127.0.0.1:${PORT}` },
+  // The editor + mermaid load from CDNs; sandboxes that intercept TLS for
+  // egress monitoring present a cert Chromium won't trust by default.
+  use: { baseURL: `http://127.0.0.1:${PORT}`, ignoreHTTPSErrors: true },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
     command: `node tests/e2e/fixtureServer.js`,
