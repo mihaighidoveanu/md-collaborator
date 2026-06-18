@@ -127,6 +127,12 @@ async function createPullRequest(owner, repo, head, base, title, body) {
   return { number: data.number, html_url: data.html_url };
 }
 
+// Delete a branch (best-effort cleanup of a half-created review branch).
+async function deleteBranch(owner, repo, branch) {
+  const octokit = getOctokit();
+  await octokit.git.deleteRef({ owner, repo, ref: `heads/${branch}` });
+}
+
 module.exports = {
   getPR,
   getPRFiles,
@@ -135,4 +141,5 @@ module.exports = {
   getCurrentHeadSha,
   createBranch,
   createPullRequest,
+  deleteBranch,
 };

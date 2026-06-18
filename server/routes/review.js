@@ -5,6 +5,9 @@ const { lineDiff, threeWay } = require('../lib/diff');
 const { withRetry } = require('../lib/retry');
 const createSessionMiddleware = require('../middleware/session');
 
+// Columns returned for a comment, shared by the list and create endpoints.
+const COMMENT_COLS = 'id, file_path, anchor_text, paragraph_index, body, resolved, created_at';
+
 // Compose the PR body so the reviewer's comments travel with the pull request.
 // Anchored comments quote the paragraph they refer to; free comments are listed
 // on their own. (Inline GitHub review comments are intentionally out of scope.)
@@ -30,6 +33,21 @@ function createReviewRouter({ db, github }) {
   const router = express.Router();
   const { requireSession, requireActiveOrSubmitted } = createSessionMiddleware(db);
 
+  // Short-lived cache of a PR's reviewable file set. A reviewer opens many files
+  // in a sitting and each open re-validates membership; without this every open
+  // re-paginates the PR's file list. TTL is brief so a changed file set is picked
+  // up quickly.
+  const prFilesCache = new Map(); // `${owner}/${repo}#${pr}` -> { files, at }
+  const PR_FILES_TTL_MS = 15000;
+  async function reviewableFiles(session) {
+    const key = `${session.owner}/${session.repo}#${session.pr_number}`;
+    const hit = prFilesCache.get(key);
+    if (hit && Date.now() - hit.at < PR_FILES_TTL_MS) return hit.files;
+    const files = await github.getPRFiles(session.owner, session.repo, session.pr_number);
+    prFilesCache.set(key, { files, at: Date.now() });
+    return files;
+  }
+
   // Serve the partner UI
   router.get('/:token', (req, res) => {
     const { token } = req.params;
@@ -42,7 +60,7 @@ function createReviewRouter({ db, github }) {
   router.get('/api/:token', requireActiveOrSubmitted, async (req, res) => {
     const { session } = req;
     try {
-      const prFiles = await github.getPRFiles(session.owner, session.repo, session.pr_number);
+      const prFiles = await reviewableFiles(session);
       const editedPaths = new Set(
         db.prepare('SELECT file_path FROM file_edits WHERE session_id = ?')
           .all(session.id)
@@ -82,7 +100,7 @@ function createReviewRouter({ db, github }) {
     // A reviewer may only read files that are part of this session's review set.
     let reviewable;
     try {
-      reviewable = await github.getPRFiles(session.owner, session.repo, session.pr_number);
+      reviewable = await reviewableFiles(session);
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -223,6 +241,9 @@ function createReviewRouter({ db, github }) {
       return res.json({ ok: true, submitted: false });
     }
 
+    // If we fail after creating the branch but before the PR exists, this holds
+    // the branch to delete so a failed submit leaves nothing behind.
+    let branchToCleanup = null;
     try {
       // Commit off the live head so we never clobber work that landed since the
       // session was created — the three-way view already surfaced any drift.
@@ -234,6 +255,7 @@ function createReviewRouter({ db, github }) {
 
       const branchName = `review/pr${session.pr_number}-${session.token.slice(0, 8)}`;
       const newBranch = await github.createBranch(session.owner, session.repo, branchName, liveHeadSha);
+      branchToCleanup = newBranch;
 
       await github.commitChanges(
         session.owner,
@@ -259,6 +281,8 @@ function createReviewRouter({ db, github }) {
         `Review: ${session.pr_title}`,
         body
       );
+      // The PR now owns the branch — past this point we must not delete it.
+      branchToCleanup = null;
 
       db.prepare(
         "UPDATE sessions SET status = 'submitted', submitted_pr_number = ?, submitted_pr_url = ?, submitted_branch = ? WHERE id = ?"
@@ -266,6 +290,11 @@ function createReviewRouter({ db, github }) {
 
       res.json({ ok: true, submitted: true, pr_number: pr.number, pr_url: pr.html_url });
     } catch (err) {
+      // Best-effort cleanup of a half-created branch so a retry starts clean and
+      // no orphan branch is left behind. Never mask the original error.
+      if (branchToCleanup) {
+        try { await github.deleteBranch(session.owner, session.repo, branchToCleanup); } catch {}
+      }
       res.status(500).json({ error: err.message });
     }
   });
@@ -276,7 +305,7 @@ function createReviewRouter({ db, github }) {
   // they remain visible after the review is submitted.
   router.get('/api/:token/comments', requireActiveOrSubmitted, (req, res) => {
     const rows = db.prepare(
-      'SELECT id, file_path, anchor_text, paragraph_index, body, resolved, created_at FROM comments WHERE session_id = ? ORDER BY created_at'
+      `SELECT ${COMMENT_COLS} FROM comments WHERE session_id = ? ORDER BY created_at`
     ).all(req.session.id);
     res.json(rows);
   });
@@ -300,7 +329,7 @@ function createReviewRouter({ db, github }) {
       Date.now()
     );
     const row = db.prepare(
-      'SELECT id, file_path, anchor_text, paragraph_index, body, resolved, created_at FROM comments WHERE id = ?'
+      `SELECT ${COMMENT_COLS} FROM comments WHERE id = ?`
     ).get(info.lastInsertRowid);
     res.json(row);
   });

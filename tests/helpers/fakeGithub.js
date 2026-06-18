@@ -15,7 +15,7 @@ function createFakeGithub(config = {}) {
   const prs = config.prs || {};        // key `${owner}/${repo}#${number}` -> { state, title, head:{ref,sha}, files, contents }
   const calls = {
     getPR: [], getPRFiles: [], getFileContent: [], commitChanges: [], getCurrentHeadSha: [],
-    createBranch: [], createPullRequest: [],
+    createBranch: [], createPullRequest: [], deleteBranch: [],
   };
   // headShas lets a test simulate the branch advancing after session creation.
   const headShas = config.headShas || {}; // key `${owner}/${repo}@${branch}` -> sha
@@ -92,11 +92,19 @@ function createFakeGithub(config = {}) {
     },
 
     async createPullRequest(owner, repo, head, base, title, body) {
-      if (config.submitShouldFail) throw new Error('GitHub PR creation failed');
+      // submitShouldFail fails the whole submit at branch creation; prShouldFail
+      // lets the branch (and commit) succeed but fails at PR creation, so the
+      // route's branch cleanup path can be exercised.
+      if (config.submitShouldFail || config.prShouldFail) throw new Error('GitHub PR creation failed');
       const number = 1000 + calls.createPullRequest.length;
       const html_url = `https://github.com/${owner}/${repo}/pull/${number}`;
       calls.createPullRequest.push({ owner, repo, head, base, title, body, number, html_url });
       return { number, html_url };
+    },
+
+    async deleteBranch(owner, repo, branch) {
+      calls.deleteBranch.push({ owner, repo, branch });
+      existingBranches.delete(branch);
     },
 
     // Test-only accessors

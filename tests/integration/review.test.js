@@ -5,7 +5,7 @@ const { createFakeGithub } = require('../helpers/fakeGithub');
 
 // Build a fake configured with one open PR plus a session row already pointing
 // at it, returning everything a review-flow test needs.
-async function setup({ files, contents, status = 'active', headShas, commitShouldFail, submitShouldFail, headShaFailTimes } = {}) {
+async function setup({ files, contents, status = 'active', headShas, commitShouldFail, submitShouldFail, prShouldFail, headShaFailTimes } = {}) {
   files = files || [
     { filename: 'docs/intro.md', status: 'modified' },
     { filename: 'README.md', status: 'added' },
@@ -18,6 +18,7 @@ async function setup({ files, contents, status = 'active', headShas, commitShoul
     headShas,
     commitShouldFail,
     submitShouldFail,
+    prShouldFail,
     headShaFailTimes,
   });
   const ctx = await startTestServer({ github });
@@ -306,15 +307,36 @@ test('R11.1 if the branch advanced, submission succeeds off the live head SHA', 
   assert.equal(meta.json.status, 'submitted', 'session closes as submitted');
 });
 
-test('R11.2 if the commit to GitHub fails, the session stays open', async () => {
+test('R11.2 if the commit to GitHub fails, the session stays open and the branch is cleaned up', async () => {
   active = await setup({ commitShouldFail: true });
-  const { ctx, session } = active;
+  const { ctx, github, session } = active;
 
   await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
     { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
 
   const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
   assert.equal(res.status, 500, 'a commit failure surfaces as an error');
+
+  // The branch was created before the commit failed, so it is removed again.
+  assert.equal(github.calls.createBranch.length, 1);
+  assert.equal(github.calls.deleteBranch.length, 1, 'the half-created branch is cleaned up');
+  assert.equal(github.calls.deleteBranch[0].branch, github.calls.createBranch[0].branchName);
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.status, 'active', 'session is not left half-submitted');
+});
+
+test('R11.4b if opening the PR fails, the branch (with its commit) is cleaned up', async () => {
+  active = await setup({ prShouldFail: true });
+  const { ctx, github, session } = active;
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+
+  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res.status, 500, 'a PR-creation failure surfaces as an error');
+  assert.equal(github.calls.commitChanges.length, 1, 'the commit happened');
+  assert.equal(github.calls.deleteBranch.length, 1, 'the orphaned branch is cleaned up');
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
   assert.equal(meta.json.status, 'active', 'session is not left half-submitted');

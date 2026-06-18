@@ -858,9 +858,15 @@
 
   function openComposer(anchor) {
     if (isSubmittedSession()) return;
-    composerAnchor = anchor;
+    // Capture the target file now: the composer outlives file switches, so we
+    // must not read currentFile at submit time (it may have changed).
+    composerAnchor = {
+      file_path: currentFile || null,
+      paragraph_index: anchor ? anchor.paragraph_index : null,
+      anchor_text: anchor ? anchor.anchor_text : null,
+    };
     const ctx = document.getElementById('composer-context');
-    if (anchor && anchor.anchor_text != null) ctx.textContent = anchor.anchor_text;
+    if (composerAnchor.anchor_text != null) ctx.textContent = composerAnchor.anchor_text;
     else ctx.textContent = currentFile ? ('General comment on ' + currentFile) : 'General comment';
     document.getElementById('comments-panel').classList.remove('collapsed');
     document.getElementById('composer').style.display = 'block';
@@ -874,14 +880,11 @@
   }
   async function submitComposer() {
     const body = document.getElementById('composer-input').value.trim();
-    if (!body) return;
-    const payload = { body };
-    if (composerAnchor && composerAnchor.anchor_text != null) {
-      payload.file_path = currentFile;
+    if (!body || !composerAnchor) return;
+    const payload = { body, file_path: composerAnchor.file_path };
+    if (composerAnchor.anchor_text != null) {
       payload.paragraph_index = composerAnchor.paragraph_index;
       payload.anchor_text = composerAnchor.anchor_text;
-    } else {
-      payload.file_path = currentFile || null;
     }
     try {
       await api('POST', '/comments', payload);
@@ -892,14 +895,23 @@
       showToast('Could not add comment: ' + e.message, 3000);
     }
   }
+  // Resolve/delete update the local cache first and re-render, then sync —
+  // rolling back if the request fails — so there's no full refetch round-trip.
   async function toggleResolve(c) {
-    try { await api('PATCH', `/comments/${c.id}`, { resolved: !c.resolved }); await loadComments(); }
-    catch (e) { showToast('Failed: ' + e.message, 3000); }
+    const prev = c.resolved;
+    c.resolved = prev ? 0 : 1;
+    renderComments();
+    try { await api('PATCH', `/comments/${c.id}`, { resolved: !!c.resolved }); }
+    catch (e) { c.resolved = prev; renderComments(); showToast('Failed: ' + e.message, 3000); }
   }
   async function deleteComment(c) {
     if (!confirm('Delete this comment?')) return;
-    try { await api('DELETE', `/comments/${c.id}`); await loadComments(); }
-    catch (e) { showToast('Failed: ' + e.message, 3000); }
+    const idx = comments.indexOf(c);
+    if (idx === -1) return;
+    comments.splice(idx, 1);
+    renderComments();
+    try { await api('DELETE', `/comments/${c.id}`); }
+    catch (e) { comments.splice(idx, 0, c); renderComments(); showToast('Failed: ' + e.message, 3000); }
   }
 
   // Floating "comment on this paragraph" button that follows the hovered block.
@@ -983,6 +995,9 @@
 
   async function openFile(filePath) {
     if (currentFile === filePath) return;
+
+    // An open composer belongs to the file being left; close it on switch.
+    closeComposer();
 
     // Save pending changes for previous file before switching
     if (currentFile && editor) {
