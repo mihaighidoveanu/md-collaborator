@@ -316,12 +316,13 @@ pane above the editor**, and editing always proceeds from `upstream`:
   **Original | Your edits** with a **GitHub‑style left gutter marker** on each
   changed row. The Upstream column is dropped — the editor already shows
   upstream — and signal is carried by a **marker + color, not per‑row text** (a
-  legend explains both, so it survives grayscale / colorblindness): `✎` green on
-  the *Your edits* side where the reviewer changed a line; `↑` blue on the
-  *Original* side where the author changed it upstream since the reviewer's last
-  view (the editor on the right has the new version); `⚠` amber on a row both
-  sides changed (conflict). This keeps the table readable while still surfacing
-  every upstream change. Mount the editor on `upstream`. Editing **always continues from upstream** — the reviewer
+  legend explains both, so it survives grayscale / colorblindness). The markers
+  are role‑based (who changed the line), not GitHub's add/remove `+`/`-` — the
+  two‑way "what moved" view already uses `+`/`-` since that one is a real
+  before/after diff: `✎` green = you edited this line here; `</>` blue = it came
+  from the developer's commit (the editor on the right has the new version); `⚠`
+  amber = conflict, both sides changed it. This keeps the table readable while
+  still surfacing every upstream change. Mount the editor on `upstream`. Editing **always continues from upstream** — the reviewer
   can never drop the author's changes wholesale by taking their own stale‑based
   version. The reviewer re‑applies their changes (left column) into the editor by
   hand, and the result autosaves as usual. (Rationale: committing a mine‑based

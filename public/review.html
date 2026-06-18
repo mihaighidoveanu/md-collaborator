@@ -127,11 +127,13 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 16px;
+      min-width: 16px;
       height: 16px;
+      padding: 0 3px;
       border-radius: 3px;
       margin-right: 5px;
-      font-size: 11px;
+      font-size: 10.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       border: 1px solid rgba(27,31,35,0.15);
     }
     .tw-legend .tw-key.your .tw-chip { background: #e6ffed; color: #22863a; }
@@ -139,8 +141,10 @@
     .tw-legend .tw-key.conflict .tw-chip { background: #ffe1b3; color: #9a6700; }
 
     .tw-gutter {
-      flex: 0 0 22px;
+      flex: 0 0 30px;
       text-align: center;
+      font-size: 10.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       border-right: 1px solid #eaecef;
       border-bottom: 1px solid #f3f4f6;
       color: #6a737d;
@@ -522,7 +526,7 @@
   const TW_MARKERS = {
     conflict: { cls: 'conflict', glyph: '⚠' },
     your: { cls: 'your', glyph: '✎' },
-    author: { cls: 'author', glyph: '↑' },
+    author: { cls: 'author', glyph: '</>' },
   };
   function rowMarker(r) {
     if (r.conflict) return TW_MARKERS.conflict;
@@ -535,13 +539,13 @@
   // (Original | Your edits) the reviewer re-applies onto the upstream content
   // shown in the editor. Color and a left marker carry the signal; a legend
   // explains both:
-  //   ✎ green  → you changed this line
-  //   ↑ blue   → the author changed it upstream (the editor has the new version)
-  //   ⚠ amber  → conflict: you both changed this line
+  //   ✎  green → you edited this line here
+  //   </> blue → it came from the developer's commit (the editor has the new version)
+  //   ⚠  amber → conflict: you both changed this line
   function buildThreeWay(container, rows) {
     const legend = document.createElement('div');
     legend.className = 'tw-legend';
-    [['your', '✎', 'Your change'], ['author', '↑', 'Author changed upstream'], ['conflict', '⚠', 'Conflict (both)']]
+    [['your', '✎', 'Your edit'], ['author', '</>', 'Developer changed it'], ['conflict', '⚠', 'Conflict (both)']]
       .forEach(([cls, glyph, text]) => {
         const key = document.createElement('span');
         key.className = 'tw-key ' + cls;
