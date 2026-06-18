@@ -100,4 +100,46 @@ async function getCurrentHeadSha(owner, repo, branch) {
   return data.object.sha;
 }
 
-module.exports = { getPR, getPRFiles, getFileContent, commitChanges, getCurrentHeadSha };
+// Create a new branch pointing at fromSha. If the name is already taken,
+// append a numeric suffix until a free name is found.
+async function createBranch(owner, repo, branchName, fromSha) {
+  const octokit = getOctokit();
+  let name = branchName;
+  let attempt = 1;
+  while (true) {
+    try {
+      await octokit.git.createRef({ owner, repo, ref: `refs/heads/${name}`, sha: fromSha });
+      return name;
+    } catch (err) {
+      if (err.status === 422 && attempt < 20) {
+        attempt += 1;
+        name = `${branchName}-${attempt}`;
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+async function createPullRequest(owner, repo, head, base, title, body) {
+  const octokit = getOctokit();
+  const { data } = await octokit.pulls.create({ owner, repo, head, base, title, body });
+  return { number: data.number, html_url: data.html_url };
+}
+
+// Delete a branch (best-effort cleanup of a half-created review branch).
+async function deleteBranch(owner, repo, branch) {
+  const octokit = getOctokit();
+  await octokit.git.deleteRef({ owner, repo, ref: `heads/${branch}` });
+}
+
+module.exports = {
+  getPR,
+  getPRFiles,
+  getFileContent,
+  commitChanges,
+  getCurrentHeadSha,
+  createBranch,
+  createPullRequest,
+  deleteBranch,
+};

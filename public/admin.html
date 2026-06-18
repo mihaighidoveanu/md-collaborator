@@ -64,7 +64,7 @@
       font-weight: 600;
     }
     .badge.active { background: #dbedff; color: #0366d6; }
-    .badge.approved { background: #dcffe4; color: #22863a; }
+    .badge.submitted { background: #dcffe4; color: #22863a; }
     .badge.revoked { background: #f6f8fa; color: #6a737d; }
     .link-cell a { color: #0366d6; word-break: break-all; font-size: 12px; }
     #empty-row td { color: #6a737d; text-align: center; padding: 32px; }
@@ -167,6 +167,9 @@
           <td>
             ${s.status === 'active'
               ? `<button class="danger" onclick="revoke('${s.id}')">Revoke</button>`
+              : ''}
+            ${s.status === 'submitted' && s.submitted_pr_url
+              ? `<a href="${s.submitted_pr_url}" target="_blank" style="color:#0366d6;font-size:12px">PR #${s.submitted_pr_number}</a>`
               : ''}
           </td>
         </tr>

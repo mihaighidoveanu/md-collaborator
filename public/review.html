@@ -36,7 +36,7 @@
     }
     #approve-btn:hover:not(:disabled) { background: #2c974b; }
     #approve-btn:disabled { background: #94d3a2; cursor: not-allowed; }
-    #approve-btn.approved { background: #6a737d; }
+    #approve-btn.submitted { background: #6a737d; }
 
     #header-actions { display: flex; gap: 8px; align-items: center; }
     #save-btn {
@@ -85,6 +85,7 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      position: relative;
     }
     #no-file {
       flex: 1;
@@ -94,8 +95,138 @@
       color: #6a737d;
       font-size: 15px;
     }
-    #editor-wrap { flex: 1; overflow: hidden; }
+    #editor-wrap { flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
     #editor-wrap .toastui-editor-defaultUI { height: 100%; }
+
+    /* Reference pane: shows what moved upstream so the reviewer can re-apply
+       their changes. Stacked above the editor for the informational two-way
+       diff; collapsible and height-bounded. */
+    #reference-panel { flex-shrink: 0; display: flex; flex-direction: column; max-height: 45vh; border-bottom: 1px solid #e1e4e8; }
+
+    /* Three-way reconcile: lay the reference beside the editor (left), so the
+       reviewer reads their changes on the left and re-applies them on the right. */
+    #editor-area.reconcile { flex-direction: row; }
+    #editor-area.reconcile #reference-panel {
+      flex-direction: column;
+      max-height: none;
+      width: 42%;
+      min-width: 320px;
+      border-bottom: none;
+      border-right: 1px solid #e1e4e8;
+    }
+    #editor-area.reconcile #reference-panel.collapsed { width: auto; min-width: 0; }
+    #reference-panel.collapsed #reference-label { display: none; }
+    .tw-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 12px; background: #f6f8fa; border-bottom: 1px solid #e1e4e8; }
+    .tw-legend .tw-key {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 11px;
+      color: #57606a;
+      display: inline-flex;
+      align-items: center;
+    }
+    .tw-legend .tw-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 3px;
+      border-radius: 3px;
+      margin-right: 5px;
+      font-size: 10.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      border: 1px solid rgba(27,31,35,0.15);
+    }
+    .tw-legend .tw-key.your .tw-chip { background: #e6ffed; color: #22863a; }
+    .tw-legend .tw-key.author .tw-chip { background: #ddf4ff; color: #0969da; }
+    .tw-legend .tw-key.conflict .tw-chip { background: #ffe1b3; color: #9a6700; }
+
+    .tw-gutter {
+      flex: 0 0 30px;
+      text-align: center;
+      font-size: 10.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      border-right: 1px solid #eaecef;
+      border-bottom: 1px solid #f3f4f6;
+      color: #6a737d;
+      user-select: none;
+    }
+    .tw-gutter.your { background: #e6ffed; color: #22863a; }
+    .tw-gutter.author { background: #ddf4ff; color: #0969da; }
+    .tw-gutter.conflict { background: #ffe1b3; color: #9a6700; }
+    #reference-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 20px;
+      background: #fff8e6;
+      border-bottom: 1px solid #f2dca7;
+      font-size: 13px;
+      color: #6a5500;
+      flex-shrink: 0;
+    }
+    #reference-toggle {
+      border: 1px solid #d0d7de;
+      background: #fff;
+      color: #24292e;
+      border-radius: 6px;
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #reference-toggle:hover { background: #f6f8fa; }
+    #reference-body {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.5;
+      background: #fff;
+    }
+    #reference-panel.collapsed #reference-body { display: none; }
+
+    /* Two-way unified diff rows */
+    .diff-row { display: flex; padding: 0 16px; white-space: pre-wrap; word-break: break-word; }
+    .diff-row .diff-gutter { width: 16px; flex-shrink: 0; color: #6a737d; user-select: none; }
+    .diff-row .diff-text { flex: 1; }
+    .diff-row.add { background: #e6ffed; }
+    .diff-row.add .diff-gutter { color: #22863a; }
+    .diff-row.del { background: #ffeef0; }
+    .diff-row.del .diff-gutter { color: #cb2431; }
+    .diff-row.eq { color: #57606a; }
+
+    /* Three-way column header + rows */
+    #threeway-head { display: flex; border-bottom: 1px solid #e1e4e8; background: #f6f8fa; position: sticky; top: 0; }
+    #threeway-head .tw-col {
+      flex: 1;
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #6a737d;
+      border-right: 1px solid #e1e4e8;
+    }
+    #threeway-head .tw-col:last-child { border-right: none; }
+    .tw-row { display: flex; }
+    .tw-row.conflict { background: #fff8e6; }
+    .tw-cell {
+      flex: 1;
+      padding: 1px 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      border-right: 1px solid #eaecef;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .tw-cell:last-child { border-right: none; }
+    .tw-cell.empty { background: #fafbfc; }
+    .tw-cell.changed { background: #e6ffed; }
+    .tw-cell.upstream { background: #ddf4ff; }
+    .tw-row.conflict .tw-cell.changed, .tw-row.conflict .tw-cell.upstream { background: #ffe1b3; }
 
     #status-banner {
       display: none;
@@ -104,7 +235,7 @@
       font-weight: 500;
       text-align: center;
     }
-    #status-banner.approved { background: #dcffe4; color: #22863a; display: block; }
+    #status-banner.submitted { background: #dcffe4; color: #22863a; display: block; }
     #status-banner.revoked { background: #ffeef0; color: #cb2431; display: block; }
 
     #toast {
@@ -142,6 +273,120 @@
       text-align: left;
       padding: 12px 16px;
     }
+
+    /* Comments */
+    .icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+      color: #57606a;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 7px 9px;
+      cursor: pointer;
+    }
+    .icon-btn:hover:not(:disabled) { background: #f6f8fa; color: #24292e; }
+    .icon-btn:disabled { color: #b1b7bd; cursor: not-allowed; }
+
+    #para-comment-btn {
+      position: absolute;
+      z-index: 50;
+      padding: 3px 5px;
+      box-shadow: 0 1px 3px rgba(27,31,35,0.15);
+    }
+
+    #comments-panel {
+      width: 300px;
+      min-width: 300px;
+      background: #fff;
+      border-left: 1px solid #e1e4e8;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #comments-panel.collapsed { width: 40px; min-width: 40px; }
+    #comments-panel.collapsed #comments-body { display: none; }
+    #comments-panel.collapsed #comments-header span { display: none; }
+    #comments-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-bottom: 1px solid #e1e4e8;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    #comments-toggle {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 15px;
+      color: #6a737d;
+      line-height: 1;
+    }
+    #comments-panel.collapsed #comments-toggle { transform: rotate(180deg); }
+    #comments-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+
+    #composer { padding: 12px 14px; border-bottom: 1px solid #e1e4e8; background: #f6f8fa; }
+    #composer-context {
+      font-size: 12px;
+      color: #6a737d;
+      margin-bottom: 6px;
+      padding-left: 8px;
+      border-left: 3px solid #d0d7de;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 60px;
+      overflow: hidden;
+    }
+    #composer-input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 8px;
+      font: inherit;
+      font-size: 13px;
+      resize: vertical;
+    }
+    #composer-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+    #composer-actions button {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid #d0d7de;
+      background: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #composer-actions .primary { background: #2da44e; color: #fff; border-color: #2da44e; }
+    #composer-actions .primary:hover { background: #2c974b; }
+
+    #comments-list { padding: 8px 0; }
+    #comments-empty { padding: 16px 14px; font-size: 13px; color: #6a737d; }
+    .comment-item { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; }
+    .comment-item.resolved { opacity: 0.6; }
+    .comment-anchor {
+      font-size: 12px;
+      color: #57606a;
+      border-left: 3px solid #d0bff0;
+      padding: 2px 8px;
+      margin-bottom: 6px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      cursor: pointer;
+      max-height: 48px;
+      overflow: hidden;
+    }
+    .comment-anchor:hover { background: #faf8ff; }
+    .comment-anchor.detached { border-left-color: #e1e4e8; color: #8c959f; font-style: italic; }
+    .comment-general { font-size: 11px; color: #6a737d; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .comment-body { font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+    .comment-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 11px; color: #8c959f; }
+    .comment-meta button { background: none; border: none; padding: 0; cursor: pointer; font-size: 11px; color: #0969da; }
+    .comment-meta button:hover { text-decoration: underline; }
+    .paragraph-highlight { background: #fff8c5 !important; transition: background 1.5s; }
 
     .modal-overlay {
       position: fixed;
@@ -210,8 +455,11 @@
     <span id="pr-title"></span>
   </div>
   <div id="header-actions">
+    <button id="general-comment-btn" class="icon-btn" title="Leave a comment" disabled>
+      <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M3 1.5A1.5 1.5 0 0 0 1.5 3v7A1.5 1.5 0 0 0 3 11.5h2v2.25a.5.5 0 0 0 .82.385L9.4 11.5H13A1.5 1.5 0 0 0 14.5 10V3A1.5 1.5 0 0 0 13 1.5Z"/></svg>
+    </button>
     <button id="save-btn" disabled>Save</button>
-    <button id="approve-btn" disabled>Approve Changes</button>
+    <button id="approve-btn" disabled>Submit for PR</button>
   </div>
 </div>
 
@@ -224,7 +472,34 @@
   </div>
   <div id="editor-area">
     <div id="no-file">Select a file to review</div>
+    <div id="reference-panel" style="display:none">
+      <div id="reference-header">
+        <span id="reference-label"></span>
+        <button id="reference-toggle">Hide</button>
+      </div>
+      <div id="reference-body"></div>
+    </div>
     <div id="editor-wrap" style="display:none"></div>
+    <button id="para-comment-btn" class="icon-btn" title="Comment on this paragraph" style="display:none">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M3 1.5A1.5 1.5 0 0 0 1.5 3v7A1.5 1.5 0 0 0 3 11.5h2v2.25a.5.5 0 0 0 .82.385L9.4 11.5H13A1.5 1.5 0 0 0 14.5 10V3A1.5 1.5 0 0 0 13 1.5Z"/></svg>
+    </button>
+  </div>
+  <div id="comments-panel">
+    <div id="comments-header">
+      <span>Comments</span>
+      <button id="comments-toggle" title="Collapse">›</button>
+    </div>
+    <div id="comments-body">
+      <div id="composer" style="display:none">
+        <div id="composer-context"></div>
+        <textarea id="composer-input" placeholder="Leave a comment…" rows="3"></textarea>
+        <div id="composer-actions">
+          <button id="composer-cancel">Cancel</button>
+          <button id="composer-add" class="primary">Comment</button>
+        </div>
+      </div>
+      <div id="comments-list"></div>
+    </div>
   </div>
 </div>
 
@@ -235,10 +510,10 @@
     <h3>Some files haven't been opened yet</h3>
     <p>You haven't reviewed the following files:</p>
     <ul class="modal-file-list" id="unvisited-list"></ul>
-    <p class="modal-warning"><strong>Once you approve, you will not be able to edit any files.</strong> Do you want to go back and review these files first?</p>
+    <p class="modal-warning"><strong>Once you submit, you will not be able to edit any files.</strong> Do you want to go back and review these files first?</p>
     <div class="modal-actions">
       <button id="modal-back-btn">Go Back and Review</button>
-      <button id="modal-approve-btn">Approve Anyway</button>
+      <button id="modal-approve-btn">Submit Anyway</button>
     </div>
   </div>
 </div>
@@ -365,33 +640,327 @@
     if (el) el.classList.add('edited');
   }
 
-  async function openFile(filePath) {
-    if (currentFile === filePath) return;
+  // Build the unified two-way diff (what moved upstream since last look) into
+  // a container element.
+  function buildUnifiedDiff(container, rows) {
+    const gutter = { eq: ' ', add: '+', del: '-' };
+    rows.forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'diff-row ' + r.type;
+      const g = document.createElement('span');
+      g.className = 'diff-gutter';
+      g.textContent = gutter[r.type] || ' ';
+      const t = document.createElement('span');
+      t.className = 'diff-text';
+      t.textContent = r.text;
+      row.appendChild(g);
+      row.appendChild(t);
+      container.appendChild(row);
+    });
+  }
 
-    // Save pending changes for previous file before switching
-    if (currentFile && editor) {
-      clearTimeout(saveTimer);
-      await saveCurrentFile();
+  // Marker shown in each row's left gutter (GitHub-style), so the signal reads
+  // without relying on color alone. Conflicts win over single-sided changes.
+  const TW_MARKERS = {
+    conflict: { cls: 'conflict', glyph: '⚠' },
+    your: { cls: 'your', glyph: '✎' },
+    author: { cls: 'author', glyph: '</>' },
+  };
+  function rowMarker(r) {
+    if (r.conflict) return TW_MARKERS.conflict;
+    if (r.mineChanged) return TW_MARKERS.your;
+    if (r.upstreamChanged) return TW_MARKERS.author;
+    return null;
+  }
+
+  // Build the reconcile reference: a left gutter marker + two columns
+  // (Original | Your edits) the reviewer re-applies onto the upstream content
+  // shown in the editor. Color and a left marker carry the signal; a legend
+  // explains both:
+  //   ✎  green → you edited this line here
+  //   </> blue → it came from the developer's commit (the editor has the new version)
+  //   ⚠  amber → conflict: you both changed this line
+  function buildThreeWay(container, rows) {
+    const legend = document.createElement('div');
+    legend.className = 'tw-legend';
+    [['your', '✎', 'Your edit'], ['author', '</>', 'Developer changed it'], ['conflict', '⚠', 'Conflict (both)']]
+      .forEach(([cls, glyph, text]) => {
+        const key = document.createElement('span');
+        key.className = 'tw-key ' + cls;
+        const chip = document.createElement('span');
+        chip.className = 'tw-chip';
+        chip.textContent = glyph;
+        key.appendChild(chip);
+        key.appendChild(document.createTextNode(' ' + text));
+        legend.appendChild(key);
+      });
+    container.appendChild(legend);
+
+    const head = document.createElement('div');
+    head.id = 'threeway-head';
+    const headGutter = document.createElement('div');
+    headGutter.className = 'tw-gutter';
+    head.appendChild(headGutter);
+    ['Original', 'Your edits (re-apply)'].forEach(label => {
+      const col = document.createElement('div');
+      col.className = 'tw-col';
+      col.textContent = label;
+      head.appendChild(col);
+    });
+    container.appendChild(head);
+
+    rows.forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'tw-row' + (r.conflict ? ' conflict' : '');
+      const gutter = document.createElement('div');
+      gutter.className = 'tw-gutter';
+      const mk = rowMarker(r);
+      if (mk) { gutter.classList.add(mk.cls); gutter.textContent = mk.glyph; }
+      row.appendChild(gutter);
+      const cell = (text, extraClass) => {
+        const c = document.createElement('div');
+        c.className = 'tw-cell' + (text === null ? ' empty' : '') + (extraClass ? ' ' + extraClass : '');
+        c.textContent = text === null ? '' : text;
+        return c;
+      };
+      // Original cell flags an upstream change; Your-edits cell flags your change.
+      row.appendChild(cell(r.base, r.upstreamChanged ? 'upstream' : ''));
+      row.appendChild(cell(r.mine, r.mineChanged ? 'changed' : ''));
+      container.appendChild(row);
+    });
+  }
+
+  // Show the reference pane above the editor: a two-way diff of what moved, or
+  // the three-way comparison the reviewer re-applies their edits from. The
+  // editor still mounts on upstream — the pane is reference, not a gate.
+  function showReference(data) {
+    const area = document.getElementById('editor-area');
+    const panel = document.getElementById('reference-panel');
+    const label = document.getElementById('reference-label');
+    const body = document.getElementById('reference-body');
+    body.innerHTML = '';
+    if (data.view === 'three_way') {
+      // Side-by-side reconcile: reference left, editor (upstream) right.
+      area.classList.add('reconcile');
+      label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) in the editor; the left marker and color show your changes, the author’s upstream changes, and conflicts (see legend).';
+      buildThreeWay(body, data.diff || []);
+    } else {
+      // Informational "what moved", stacked above the editor.
+      area.classList.remove('reconcile');
+      label.textContent = "This file changed since you last looked at it. Here's what moved:";
+      buildUnifiedDiff(body, data.diff || []);
     }
+    panel.classList.remove('collapsed');
+    document.getElementById('reference-toggle').textContent = 'Hide';
+    panel.style.display = 'flex';
+  }
 
-    currentFile = filePath;
-    setActiveFile(filePath);
+  function hideReference() {
+    document.getElementById('reference-panel').style.display = 'none';
+    document.getElementById('editor-area').classList.remove('reconcile');
+  }
 
-    const { content } = await api('GET', `/files/${encodeURIComponent(filePath)}`);
-    fileOriginals[filePath] = content;
+  // --- Comments ---
+  let comments = [];
+  let composerAnchor = null;   // { paragraph_index, anchor_text } for anchored, else null
+  let hoverBlock = null;
 
-    const fileEntry = (sessionData?.files || []).find(f => f.path === filePath);
-    if (fileEntry) fileEntry.visited = true;
+  function isSubmittedSession() { return sessionData?.status === 'submitted'; }
+  function proseMirrorRoot() {
+    return document.querySelector('#editor-wrap .toastui-editor-ww-container .ProseMirror');
+  }
+  function relTime(ts) {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+  }
 
-    document.getElementById('no-file').style.display = 'none';
+  async function loadComments() {
+    try { comments = await api('GET', '/comments'); }
+    catch { comments = []; }
+    renderComments();
+  }
+
+  // Re-anchor a comment to a current block: prefer its stored index, else find a
+  // block whose text still matches; null = detached (paragraph no longer exists).
+  function findAnchorEl(c) {
+    const root = proseMirrorRoot();
+    if (!root || c.anchor_text == null) return null;
+    const blocks = Array.from(root.children);
+    const byIdx = blocks[c.paragraph_index];
+    if (byIdx && byIdx.textContent === c.anchor_text) return byIdx;
+    return blocks.find(b => b.textContent === c.anchor_text) || null;
+  }
+
+  function highlightParagraph(el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('paragraph-highlight');
+    setTimeout(() => el.classList.remove('paragraph-highlight'), 1500);
+  }
+
+  function renderComments() {
+    const list = document.getElementById('comments-list');
+    if (!list) return;
+    list.innerHTML = '';
+    // This file's comments (anchored first, then file-level), then general notes.
+    const shown = comments.filter(c => c.file_path === currentFile || c.file_path == null);
+    const rank = c => (c.anchor_text != null ? 0 : (c.file_path != null ? 1 : 2));
+    shown.sort((a, b) => rank(a) - rank(b) || a.created_at - b.created_at);
+    if (!shown.length) {
+      const empty = document.createElement('div');
+      empty.id = 'comments-empty';
+      empty.textContent = 'No comments yet.';
+      list.appendChild(empty);
+      return;
+    }
+    const submitted = isSubmittedSession();
+    shown.forEach(c => {
+      const item = document.createElement('div');
+      item.className = 'comment-item' + (c.resolved ? ' resolved' : '');
+      if (c.anchor_text != null) {
+        const anchorEl = findAnchorEl(c);
+        const a = document.createElement('div');
+        a.className = 'comment-anchor' + (anchorEl ? '' : ' detached');
+        a.textContent = anchorEl ? c.anchor_text : (c.anchor_text + '  — no longer in the document');
+        if (anchorEl) a.onclick = () => highlightParagraph(anchorEl);
+        item.appendChild(a);
+      } else if (c.file_path == null) {
+        const g = document.createElement('div');
+        g.className = 'comment-general';
+        g.textContent = 'General';
+        item.appendChild(g);
+      }
+      const body = document.createElement('div');
+      body.className = 'comment-body';
+      body.textContent = c.body;
+      item.appendChild(body);
+      const meta = document.createElement('div');
+      meta.className = 'comment-meta';
+      const time = document.createElement('span');
+      time.textContent = relTime(c.created_at) + (c.resolved ? ' · resolved' : '');
+      meta.appendChild(time);
+      if (!submitted) {
+        const resolveBtn = document.createElement('button');
+        resolveBtn.textContent = c.resolved ? 'Unresolve' : 'Resolve';
+        resolveBtn.onclick = () => toggleResolve(c);
+        meta.appendChild(resolveBtn);
+        const delBtn = document.createElement('button');
+        delBtn.textContent = 'Delete';
+        delBtn.onclick = () => deleteComment(c);
+        meta.appendChild(delBtn);
+      }
+      item.appendChild(meta);
+      list.appendChild(item);
+    });
+  }
+
+  function openComposer(anchor) {
+    if (isSubmittedSession()) return;
+    // Capture the target file now: the composer outlives file switches, so we
+    // must not read currentFile at submit time (it may have changed).
+    composerAnchor = {
+      file_path: currentFile || null,
+      paragraph_index: anchor ? anchor.paragraph_index : null,
+      anchor_text: anchor ? anchor.anchor_text : null,
+    };
+    const ctx = document.getElementById('composer-context');
+    if (composerAnchor.anchor_text != null) ctx.textContent = composerAnchor.anchor_text;
+    else ctx.textContent = currentFile ? ('General comment on ' + currentFile) : 'General comment';
+    document.getElementById('comments-panel').classList.remove('collapsed');
+    document.getElementById('composer').style.display = 'block';
+    const input = document.getElementById('composer-input');
+    input.value = '';
+    input.focus();
+  }
+  function closeComposer() {
+    document.getElementById('composer').style.display = 'none';
+    composerAnchor = null;
+  }
+  async function submitComposer() {
+    const body = document.getElementById('composer-input').value.trim();
+    if (!body || !composerAnchor) return;
+    const payload = { body, file_path: composerAnchor.file_path };
+    if (composerAnchor.anchor_text != null) {
+      payload.paragraph_index = composerAnchor.paragraph_index;
+      payload.anchor_text = composerAnchor.anchor_text;
+    }
+    try {
+      await api('POST', '/comments', payload);
+      closeComposer();
+      await loadComments();
+      showToast('Comment added');
+    } catch (e) {
+      showToast('Could not add comment: ' + e.message, 3000);
+    }
+  }
+  // Resolve/delete update the local cache first and re-render, then sync —
+  // rolling back if the request fails — so there's no full refetch round-trip.
+  async function toggleResolve(c) {
+    const prev = c.resolved;
+    c.resolved = prev ? 0 : 1;
+    renderComments();
+    try { await api('PATCH', `/comments/${c.id}`, { resolved: !!c.resolved }); }
+    catch (e) { c.resolved = prev; renderComments(); showToast('Failed: ' + e.message, 3000); }
+  }
+  async function deleteComment(c) {
+    if (!confirm('Delete this comment?')) return;
+    const idx = comments.indexOf(c);
+    if (idx === -1) return;
+    comments.splice(idx, 1);
+    renderComments();
+    try { await api('DELETE', `/comments/${c.id}`); }
+    catch (e) { comments.splice(idx, 0, c); renderComments(); showToast('Failed: ' + e.message, 3000); }
+  }
+
+  // Floating "comment on this paragraph" button that follows the hovered block.
+  function attachParagraphCommenting() {
+    const btn = document.getElementById('para-comment-btn');
+    btn.style.display = 'none';
+    const root = proseMirrorRoot();
+    if (!root || isSubmittedSession()) return;
+    const area = document.getElementById('editor-area');
+    let hideTimer = null;
+    const cancelHide = () => clearTimeout(hideTimer);
+    const scheduleHide = () => { hideTimer = setTimeout(() => { btn.style.display = 'none'; }, 200); };
+
+    function topBlockFrom(node) {
+      let el = node;
+      while (el && el.parentElement !== root) el = el.parentElement;
+      return (el && el.parentElement === root) ? el : null;
+    }
+    root.addEventListener('mousemove', (e) => {
+      cancelHide();
+      const block = topBlockFrom(e.target);
+      if (!block) return;
+      hoverBlock = block;
+      const br = block.getBoundingClientRect();
+      const ar = area.getBoundingClientRect();
+      btn.style.display = 'inline-flex';
+      btn.style.top = (br.top - ar.top + 2) + 'px';
+      btn.style.left = (br.right - ar.left - 30) + 'px';
+    });
+    root.addEventListener('mouseleave', scheduleHide);
+    btn.onmouseenter = cancelHide;
+    btn.onmouseleave = scheduleHide;
+    btn.onclick = () => {
+      if (!hoverBlock) return;
+      const blocks = Array.from(root.children);
+      const idx = blocks.indexOf(hoverBlock);
+      if (idx < 0) return;
+      openComposer({ paragraph_index: idx, anchor_text: hoverBlock.textContent });
+    };
+  }
+
+  // Mount the WYSIWYG editor for the current file, loaded with `content` as the
+  // editing baseline. Does not touch the reference pane.
+  function mountEditor(content) {
     const wrap = document.getElementById('editor-wrap');
     wrap.style.display = 'flex';
 
-    const isApproved = sessionData?.status === 'approved';
-
-    if (editor) {
-      editor.destroy();
-    }
+    const isSubmitted = sessionData?.status === 'submitted';
+    if (editor) editor.destroy();
 
     editor = new toastui.Editor({
       el: wrap,
@@ -399,7 +968,7 @@
       initialEditType: 'wysiwyg',
       previewStyle: 'vertical',
       initialValue: content,
-      toolbarItems: isApproved ? [] : [
+      toolbarItems: isSubmitted ? [] : [
         ['heading', 'bold', 'italic', 'strike'],
         ['hr', 'quote'],
         ['ul', 'ol', 'task'],
@@ -410,7 +979,7 @@
       plugins: [mermaidPlugin],
     });
 
-    if (isApproved) {
+    if (isSubmitted) {
       editor.getEditorElements().mdEditor.setAttribute('contenteditable', 'false');
       editor.getEditorElements().wwEditor.setAttribute('contenteditable', 'false');
     } else {
@@ -420,6 +989,44 @@
         saveTimer = setTimeout(saveCurrentFile, 1500);
       });
     }
+    attachParagraphCommenting();
+    renderComments();
+  }
+
+  async function openFile(filePath) {
+    if (currentFile === filePath) return;
+
+    // An open composer belongs to the file being left; close it on switch.
+    closeComposer();
+
+    // Save pending changes for previous file before switching
+    if (currentFile && editor) {
+      clearTimeout(saveTimer);
+      await saveCurrentFile();
+    }
+
+    currentFile = filePath;
+    setActiveFile(filePath);
+
+    const data = await api('GET', `/files/${encodeURIComponent(filePath)}`);
+
+    const fileEntry = (sessionData?.files || []).find(f => f.path === filePath);
+    if (fileEntry) fileEntry.visited = true;
+
+    document.getElementById('no-file').style.display = 'none';
+
+    const isSubmitted = sessionData?.status === 'submitted';
+    // When something moved (two- or three-way), keep the comparison visible as a
+    // reference and edit from upstream so the author's changes are never dropped.
+    // On a read-only submitted session there's nothing to reconcile.
+    const hasReference = (data.view === 'two_way' || data.view === 'three_way') && !isSubmitted;
+    const editContent = hasReference ? data.upstream : data.content;
+
+    if (hasReference) showReference(data);
+    else hideReference();
+
+    fileOriginals[filePath] = editContent;
+    mountEditor(editContent);
   }
 
   async function saveCurrentFile() {
@@ -480,14 +1087,14 @@
     });
   }
 
-  async function approve() {
+  async function submit() {
     const unvisited = (sessionData?.files || []).filter(f => !f.visited).map(f => f.path);
 
     if (unvisited.length > 0) {
       const proceed = await showIncompleteModal(unvisited);
       if (!proceed) return;
     } else {
-      if (!confirm('Are you sure you want to approve all changes? You will not be able to edit afterwards.')) return;
+      if (!confirm('Submit your edits as a pull request? You will not be able to edit afterwards.')) return;
     }
 
     // Save any pending changes first
@@ -499,26 +1106,26 @@
     btn.textContent = 'Submitting…';
 
     try {
-      await api('POST', '/approve');
-      sessionData.status = 'approved';
-      showApprovedState();
-      showToast('Changes approved and committed!', 3000);
+      await api('POST', '/submit');
+      sessionData.status = 'submitted';
+      showSubmittedState();
+      showToast('Submitted for review', 3000);
     } catch (e) {
       btn.disabled = false;
-      btn.textContent = 'Approve Changes';
+      btn.textContent = 'Submit for PR';
       showToast('Error: ' + e.message, 4000);
     }
   }
 
-  function showApprovedState() {
+  function showSubmittedState() {
     const btn = document.getElementById('approve-btn');
-    btn.textContent = 'Approved';
+    btn.textContent = 'Submitted';
     btn.disabled = true;
-    btn.classList.add('approved');
+    btn.classList.add('submitted');
 
     const banner = document.getElementById('status-banner');
-    banner.textContent = 'Changes have been approved and committed to the pull request.';
-    banner.className = 'approved';
+    banner.className = 'submitted';
+    banner.textContent = 'Your changes have been submitted for review.';
 
     // Re-open current file as read-only
     if (currentFile) {
@@ -543,14 +1150,31 @@
 
     renderFileList(sessionData.files);
 
-    if (sessionData.status === 'approved') {
-      showApprovedState();
+    if (sessionData.status === 'submitted') {
+      showSubmittedState();
     } else {
       const approveBtn = document.getElementById('approve-btn');
       approveBtn.disabled = false;
-      approveBtn.addEventListener('click', approve);
+      approveBtn.addEventListener('click', submit);
       document.getElementById('save-btn').addEventListener('click', manualSave);
+      document.getElementById('general-comment-btn').disabled = false;
     }
+
+    // Collapse / expand the reference pane.
+    document.getElementById('reference-toggle').addEventListener('click', () => {
+      const panel = document.getElementById('reference-panel');
+      const collapsed = panel.classList.toggle('collapsed');
+      document.getElementById('reference-toggle').textContent = collapsed ? 'Show' : 'Hide';
+    });
+
+    // Comments: general-comment button, composer, panel collapse.
+    document.getElementById('general-comment-btn').addEventListener('click', () => openComposer(null));
+    document.getElementById('composer-cancel').addEventListener('click', closeComposer);
+    document.getElementById('composer-add').addEventListener('click', submitComposer);
+    document.getElementById('comments-toggle').addEventListener('click', () => {
+      document.getElementById('comments-panel').classList.toggle('collapsed');
+    });
+    loadComments();
 
     // Auto-open first file
     if (sessionData.files.length > 0) {
