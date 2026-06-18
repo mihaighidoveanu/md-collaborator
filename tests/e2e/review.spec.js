@@ -30,9 +30,9 @@ test('R8.2 approving while some files are still unopened warns the reviewer firs
   // Only the first file auto-opened; the second is unvisited. Approve should warn.
   await page.locator('#approve-btn').click();
 
-  const modal = page.locator('#incomplete-modal');
+  const modal = page.locator('#confirm-modal');
   await expect(modal).toBeVisible();
-  await expect(page.locator('#unvisited-list')).toContainText('docs/extra.md');
+  await expect(page.locator('#confirm-modal-list')).toContainText('docs/extra.md');
 });
 
 // REQ-14 — Diagrams render for the reviewer.
