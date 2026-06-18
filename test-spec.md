@@ -6,7 +6,7 @@
 
 **Suggested level** per test: **U** = pure-logic unit · **I** = API/integration · **E** = end-to-end browser. This is guidance for whoever implements them, not part of the assertion.
 
-**Total: 44 tests.**
+**Total: 45 tests.**
 
 > ⚠️ Two tests encode *intended* behavior that the current implementation does not yet satisfy (marked **[drives fix]**). They are expected to fail until the code is corrected.
 
@@ -33,6 +33,7 @@ A session turns an open PR into a shareable review link.
 | R2.2 | unhappy | I | A closed or merged PR is refused — you cannot review a PR that can no longer receive the commit |
 | R2.3 | unhappy | I | A PR with no markdown files is refused — there is nothing to review |
 | R2.4 | unhappy | I | A reference that is not a valid GitHub PR URL is refused before any external call |
+| R2.5 | edge | I | Creating a session for a PR that already has an active session reuses it instead of opening a second, forked one |
 
 ---
 
@@ -243,7 +244,7 @@ next round starts clean — and a reused branch is never deleted on failure
 | Requirement | Tests | Happy | Unhappy/Edge |
 |-------------|-------|-------|--------------|
 | R1 Admin auth | R1.1–R1.2 | ✓ | ✓ |
-| R2 Create session | R2.1–R2.4 | ✓ | ✓ |
+| R2 Create session | R2.1–R2.5 | ✓ | ✓ |
 | R3 File scope | R3.1–R3.3 | ✓ | ✓ |
 | R4 Oversight | R4.1 | ✓ | — |
 | R5 Revoke | R5.1–R5.2 | ✓ | ✓ |

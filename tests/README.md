@@ -39,6 +39,7 @@ The E2E specs cover behaviors that only exist in the browser and load the editor
 | R2.2 | closed/merged PR refused                  | I | integration/admin.test.js |
 | R2.3 | PR with no markdown refused               | I | integration/admin.test.js |
 | R2.4 | invalid URL refused before any GH call    | I | integration/admin.test.js |
+| R2.5 | existing active session for a PR is reused, not forked | I | integration/admin.test.js |
 | R3.1 | non-markdown files excluded               | U | unit/files.test.js |
 | R3.2 | deleted markdown excluded                 | U | unit/files.test.js |
 | R3.3 | large PR drops nothing                     | U/I | unit/files.test.js, integration/review.test.js |
@@ -100,3 +101,10 @@ The spec flagged behaviors the implementation did not yet satisfy, now fixed:
   `commitChanges` did not advance the branch's tracked head SHA), so a
   second real submit through the fake — exactly what re-submission e2e
   coverage needs — threw 404 on `getPRState`. Both are now tracked.
+- **R2.5** — `POST /admin/sessions` created a brand-new session every call,
+  with no check for one already active on the same PR. Each session tracks
+  its own `submitted_branch`/PR independently (REQ-18), so two sessions for
+  the same PR each believe no review PR exists yet and open their own —
+  producing two open review PRs for one developer PR, the live-deployment
+  bug report that drove this fix. Session creation now reuses the existing
+  active session for that PR instead of forking a second one.

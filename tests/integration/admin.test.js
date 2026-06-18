@@ -88,6 +88,30 @@ test('R2.4 a non-PR-URL reference is refused before any external call', async ()
   assert.equal(gh.calls.getPR.length, 0, 'no GitHub call was made for an invalid reference');
 });
 
+test('R2.5 creating a session for a PR that already has an active session reuses it instead of forking a second one', async () => {
+  ctx = await startTestServer({ github: createFakeGithub(openPrConfig()) });
+
+  const first = await ctx.admin('POST', '/admin/sessions', { body: { pr_url: 'https://github.com/acme/docs/pull/1' } });
+  assert.equal(first.status, 200);
+  assert.ok(!first.json.reused, 'the first call creates a fresh session');
+
+  const second = await ctx.admin('POST', '/admin/sessions', { body: { pr_url: 'https://github.com/acme/docs/pull/1' } });
+  assert.equal(second.status, 200);
+  assert.equal(second.json.reused, true, 'the second call reports it reused the existing session');
+  assert.equal(second.json.session_id, first.json.session_id, 'same session — REQ-18 reuse stays meaningful');
+  assert.equal(second.json.review_link, first.json.review_link);
+
+  const list = await ctx.admin('GET', '/admin/sessions');
+  assert.equal(list.json.length, 1, 'only one session row exists for the PR');
+
+  // Revoking the existing session frees the PR up for a genuinely new one.
+  await ctx.admin('POST', `/admin/sessions/${first.json.session_id}/revoke`);
+  const third = await ctx.admin('POST', '/admin/sessions', { body: { pr_url: 'https://github.com/acme/docs/pull/1' } });
+  assert.equal(third.status, 200);
+  assert.ok(!third.json.reused, 'a revoked session does not block a new one');
+  assert.notEqual(third.json.session_id, first.json.session_id);
+});
+
 // REQ-4 — An admin can oversee all sessions.
 
 test('R4.1 the listing shows status, edit count, and a link that actually opens the session', async () => {

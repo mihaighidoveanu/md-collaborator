@@ -57,6 +57,23 @@ function createAdminRouter({ db, github }) {
       return res.status(400).json({ error: 'PR has no markdown files to review' });
     }
 
+    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+
+    // An active session for this PR already tracks its own review branch/PR
+    // (REQ-18). Minting a second session here would fork that state — each
+    // would independently believe no review PR exists yet and open its own,
+    // leaving two open review PRs for the same developer PR. Reuse it instead.
+    const existing = db.prepare(
+      "SELECT id, token FROM sessions WHERE owner = ? AND repo = ? AND pr_number = ? AND status = 'active'"
+    ).get(owner, repo, prNumber);
+    if (existing) {
+      return res.json({
+        session_id: existing.id,
+        review_link: `${baseUrl}/review/${existing.token}`,
+        reused: true,
+      });
+    }
+
     const id = crypto.randomUUID();
     const token = crypto.randomBytes(32).toString('hex');
 
@@ -65,7 +82,6 @@ function createAdminRouter({ db, github }) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
     `).run(id, token, owner, repo, prNumber, pr.title, pr.head.ref, pr.head.sha, Date.now());
 
-    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
     res.json({
       session_id: id,
       review_link: `${baseUrl}/review/${token}`,

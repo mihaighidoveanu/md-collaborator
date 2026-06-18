@@ -46,7 +46,9 @@
       border-radius: 8px;
       padding: 16px 20px;
     }
-    #link-result p { font-size: 13px; color: #22863a; margin-bottom: 8px; font-weight: 600; }
+    #link-result.reused { background: #fff8e6; border-color: #f9c513; }
+  #link-result p { font-size: 13px; color: #22863a; margin-bottom: 8px; font-weight: 600; }
+  #link-result.reused p { color: #9a6700; }
     #link-result a { font-size: 14px; word-break: break-all; color: #0366d6; }
     #copy-btn { margin-top: 10px; }
 
@@ -95,7 +97,7 @@
 <div id="error-msg"></div>
 
 <div id="link-result">
-  <p>Review link created — share this with your partner:</p>
+  <p id="link-result-label">Review link created — share this with your partner:</p>
   <a id="link-anchor" href="#" target="_blank"></a>
   <br />
   <button id="copy-btn" onclick="copyLink()">Copy link</button>
@@ -198,7 +200,12 @@
     const anchor = document.getElementById('link-anchor');
     anchor.href = createdLink;
     anchor.textContent = createdLink;
-    document.getElementById('link-result').style.display = 'block';
+    const resultBox = document.getElementById('link-result');
+    resultBox.classList.toggle('reused', !!data.reused);
+    document.getElementById('link-result-label').textContent = data.reused
+      ? 'An active session for this PR already exists — reusing its link:'
+      : 'Review link created — share this with your partner:';
+    resultBox.style.display = 'block';
     document.getElementById('pr-url-input').value = '';
     loadSessions();
   }
