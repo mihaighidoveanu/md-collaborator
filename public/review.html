@@ -123,17 +123,32 @@
       display: inline-flex;
       align-items: center;
     }
-    .tw-legend .tw-key::before {
-      content: '';
-      width: 10px;
-      height: 10px;
-      border-radius: 2px;
+    .tw-legend .tw-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 3px;
       margin-right: 5px;
+      font-size: 11px;
       border: 1px solid rgba(27,31,35,0.15);
     }
-    .tw-legend .tw-key.your::before { background: #e6ffed; }
-    .tw-legend .tw-key.author::before { background: #ddf4ff; }
-    .tw-legend .tw-key.conflict::before { background: #ffe1b3; }
+    .tw-legend .tw-key.your .tw-chip { background: #e6ffed; color: #22863a; }
+    .tw-legend .tw-key.author .tw-chip { background: #ddf4ff; color: #0969da; }
+    .tw-legend .tw-key.conflict .tw-chip { background: #ffe1b3; color: #9a6700; }
+
+    .tw-gutter {
+      flex: 0 0 22px;
+      text-align: center;
+      border-right: 1px solid #eaecef;
+      border-bottom: 1px solid #f3f4f6;
+      color: #6a737d;
+      user-select: none;
+    }
+    .tw-gutter.your { background: #e6ffed; color: #22863a; }
+    .tw-gutter.author { background: #ddf4ff; color: #0969da; }
+    .tw-gutter.conflict { background: #ffe1b3; color: #9a6700; }
     #reference-header {
       display: flex;
       align-items: center;
@@ -502,27 +517,48 @@
     });
   }
 
-  // Build the reconcile reference: two columns (Original | Your edits) the
-  // reviewer re-applies onto the upstream content shown in the editor. Color,
-  // not text, carries the signal — a small legend explains it:
-  //   • Your edits cell highlighted  → you changed this line
-  //   • Original cell highlighted    → the author changed it upstream (the
-  //                                     editor on the right has the new version)
-  //   • whole row amber              → conflict: you both changed this line
+  // Marker shown in each row's left gutter (GitHub-style), so the signal reads
+  // without relying on color alone. Conflicts win over single-sided changes.
+  const TW_MARKERS = {
+    conflict: { cls: 'conflict', glyph: '⚠' },
+    your: { cls: 'your', glyph: '✎' },
+    author: { cls: 'author', glyph: '↑' },
+  };
+  function rowMarker(r) {
+    if (r.conflict) return TW_MARKERS.conflict;
+    if (r.mineChanged) return TW_MARKERS.your;
+    if (r.upstreamChanged) return TW_MARKERS.author;
+    return null;
+  }
+
+  // Build the reconcile reference: a left gutter marker + two columns
+  // (Original | Your edits) the reviewer re-applies onto the upstream content
+  // shown in the editor. Color and a left marker carry the signal; a legend
+  // explains both:
+  //   ✎ green  → you changed this line
+  //   ↑ blue   → the author changed it upstream (the editor has the new version)
+  //   ⚠ amber  → conflict: you both changed this line
   function buildThreeWay(container, rows) {
     const legend = document.createElement('div');
     legend.className = 'tw-legend';
-    [['your', 'Your change'], ['author', 'Author changed upstream'], ['conflict', 'Conflict (both)']]
-      .forEach(([cls, text]) => {
+    [['your', '✎', 'Your change'], ['author', '↑', 'Author changed upstream'], ['conflict', '⚠', 'Conflict (both)']]
+      .forEach(([cls, glyph, text]) => {
         const key = document.createElement('span');
         key.className = 'tw-key ' + cls;
-        key.textContent = text;
+        const chip = document.createElement('span');
+        chip.className = 'tw-chip';
+        chip.textContent = glyph;
+        key.appendChild(chip);
+        key.appendChild(document.createTextNode(' ' + text));
         legend.appendChild(key);
       });
     container.appendChild(legend);
 
     const head = document.createElement('div');
     head.id = 'threeway-head';
+    const headGutter = document.createElement('div');
+    headGutter.className = 'tw-gutter';
+    head.appendChild(headGutter);
     ['Original', 'Your edits (re-apply)'].forEach(label => {
       const col = document.createElement('div');
       col.className = 'tw-col';
@@ -534,6 +570,11 @@
     rows.forEach(r => {
       const row = document.createElement('div');
       row.className = 'tw-row' + (r.conflict ? ' conflict' : '');
+      const gutter = document.createElement('div');
+      gutter.className = 'tw-gutter';
+      const mk = rowMarker(r);
+      if (mk) { gutter.classList.add(mk.cls); gutter.textContent = mk.glyph; }
+      row.appendChild(gutter);
       const cell = (text, extraClass) => {
         const c = document.createElement('div');
         c.className = 'tw-cell' + (text === null ? ' empty' : '') + (extraClass ? ' ' + extraClass : '');
@@ -559,7 +600,7 @@
     if (data.view === 'three_way') {
       // Side-by-side reconcile: reference left, editor (upstream) right.
       area.classList.add('reconcile');
-      label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) in the editor; colors mark your changes, the author’s upstream changes, and conflicts (see legend).';
+      label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) in the editor; the left marker and color show your changes, the author’s upstream changes, and conflicts (see legend).';
       buildThreeWay(body, data.diff || []);
     } else {
       // Informational "what moved", stacked above the editor.

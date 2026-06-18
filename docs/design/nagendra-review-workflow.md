@@ -313,14 +313,15 @@ pane above the editor**, and editing always proceeds from `upstream`:
   last looked" — and mount the editor on `upstream`.
 - `three_way` → lay the reference pane **beside the editor** (reference left,
   editor right) for compare‑while‑editing. The reference is a **2‑column** view:
-  **Original | Your edits**. The Upstream column is dropped — the editor already
-  shows upstream — and signal is carried by **color, not per‑row text** (a small
-  legend explains it): the *Your edits* cell is highlighted where the reviewer
-  changed a line (green), the *Original* cell is highlighted where the author
-  changed it upstream since the reviewer's last view (blue — the editor on the
-  right has the new version), and a row both sides changed is a conflict (amber).
-  This keeps the table readable while still surfacing every upstream change.
-  Mount the editor on `upstream`. Editing **always continues from upstream** — the reviewer
+  **Original | Your edits** with a **GitHub‑style left gutter marker** on each
+  changed row. The Upstream column is dropped — the editor already shows
+  upstream — and signal is carried by a **marker + color, not per‑row text** (a
+  legend explains both, so it survives grayscale / colorblindness): `✎` green on
+  the *Your edits* side where the reviewer changed a line; `↑` blue on the
+  *Original* side where the author changed it upstream since the reviewer's last
+  view (the editor on the right has the new version); `⚠` amber on a row both
+  sides changed (conflict). This keeps the table readable while still surfacing
+  every upstream change. Mount the editor on `upstream`. Editing **always continues from upstream** — the reviewer
   can never drop the author's changes wholesale by taking their own stale‑based
   version. The reviewer re‑applies their changes (left column) into the editor by
   hand, and the result autosaves as usual. (Rationale: committing a mine‑based
