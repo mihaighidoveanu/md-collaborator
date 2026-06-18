@@ -39,6 +39,16 @@ function buildFixture() {
         files: [{ filename: 'docs/arch.md', status: 'modified' }],
         contents: { 'docs/arch.md': MERMAID_DOC },
       },
+      'acme/docs#3': {
+        state: 'open', title: 'E2E approve', head: { ref: 'approve-flow', sha: 'sha-3' },
+        files: [{ filename: 'docs/approve.md', status: 'modified' }],
+        contents: { 'docs/approve.md': '# Approve\n\nNothing to change here.\n' },
+      },
+      'acme/docs#4': {
+        state: 'open', title: 'E2E submit', head: { ref: 'submit-flow', sha: 'sha-4' },
+        files: [{ filename: 'docs/submit.md', status: 'modified' }],
+        contents: { 'docs/submit.md': '# Submit\n\nGoing to be edited.\n' },
+      },
     },
   });
   const app = createApp({ db, github });
@@ -50,6 +60,8 @@ function buildFixture() {
   // Fixed tokens the specs navigate to.
   seed({ id: 'e2e-plain', token: 'tok-plain', owner: 'acme', repo: 'docs', pr_number: 1, pr_title: 'E2E docs', head_branch: 'feature', head_sha: 'sha-1' });
   seed({ id: 'e2e-mermaid', token: 'tok-mermaid', owner: 'acme', repo: 'docs', pr_number: 2, pr_title: 'E2E diagram', head_branch: 'diagram', head_sha: 'sha-2' });
+  seed({ id: 'e2e-approve', token: 'tok-approve', owner: 'acme', repo: 'docs', pr_number: 3, pr_title: 'E2E approve', head_branch: 'approve-flow', head_sha: 'sha-3' });
+  seed({ id: 'e2e-submit', token: 'tok-submit', owner: 'acme', repo: 'docs', pr_number: 4, pr_title: 'E2E submit', head_branch: 'submit-flow', head_sha: 'sha-4' });
 
   return { app, db, github };
 }

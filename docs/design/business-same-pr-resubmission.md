@@ -383,16 +383,21 @@ else:                btn.textContent = 'Approve'
 ### 5.3 Submit handling — no terminal lock
 
 - **Remove** `showSubmittedState()`'s locking behavior. After a `submitted`
-  response: keep the editor editable, show a **persistent banner** with the review
-  PR + branch link, e.g. `Changes committed → PR #<n> (review/pr…-…)` linking
-  `submitted_pr_url`. Then `refreshSubmitButton()` (baselines advanced ⇒ reverts to
-  "Approve").
-- After an `approved` response: toast "Approved on GitHub", set `approved_at`
-  locally, `refreshSubmitButton()` → "Approved ✓".
+  response: keep the editor editable, show a **persistent banner** linking
+  `submitted_pr_url`. The business reviewer doesn't know what a "PR", branch,
+  "commit", or "GitHub" is, so the banner names none of that and instead
+  states the outcome plainly, e.g. `Your edits have been sent to the
+  development team for implementation. [View details]`. Then
+  `refreshSubmitButton()` (baselines advanced ⇒ reverts to "Approve").
+- After an `approved` response: toast "Approval sent to the developers", set
+  `approved_at` locally, `refreshSubmitButton()` → "Approved ✓".
 - The confirm modal copy that says *"Once you submit, you will not be able to edit
-  any files."* is now **false** — replace with neutral copy (e.g. *"Commit your
-  changes to the review PR?"* for the edits case; *"Approve this PR on GitHub?"*
-  for the approve case). The unopened-files warning can stay for the edits case.
+  any files."* is now **false** — replace with copy that names no GitHub
+  jargon ("PR", branch, "commit") and just states the outcome, e.g. *"Your
+  edits will be sent to the development team for implementation."* for the
+  edits case; *"This sends your approval to the developers with no
+  changes."* for the approve case (title: "Approve this review?", not
+  "Approve this PR?"). The unopened-files warning can stay for both cases.
 - `init()`: drop the `status === 'submitted'` terminal branch; always wire up the
   editable controls. Surface the review-PR banner if `submitted_pr_url` is present.
 

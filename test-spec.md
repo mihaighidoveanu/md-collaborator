@@ -2,11 +2,11 @@
 
 **Scope:** Functional correctness only. Out of scope: security, performance, code quality, UX.
 
-**Approach:** Tests are organized by **business requirement**, not by code structure. Each test asserts *observable behavior* a stakeholder would recognize ("the reviewer cannot edit an approved session"), never an implementation detail (field names, SQL clauses, helper-function internals). This keeps the suite meaningful and refactor-resistant: every test traces to a rule the product must honor.
+**Approach:** Tests are organized by **business requirement**, not by code structure. Each test asserts *observable behavior* a stakeholder would recognize ("the reviewer cannot edit a revoked session"), never an implementation detail (field names, SQL clauses, helper-function internals). This keeps the suite meaningful and refactor-resistant: every test traces to a rule the product must honor.
 
 **Suggested level** per test: **U** = pure-logic unit · **I** = API/integration · **E** = end-to-end browser. This is guidance for whoever implements them, not part of the assertion.
 
-**Total: 41 tests.**
+**Total: 44 tests.**
 
 > ⚠️ Two tests encode *intended* behavior that the current implementation does not yet satisfy (marked **[drives fix]**). They are expected to fail until the code is corrected.
 
@@ -93,16 +93,18 @@ Reviewers see all of the PR's markdown and nothing else.
 
 ---
 
-## REQ-9 — Submission opens a pull request and closes the session
+## REQ-9 — Submission approves or commits, and never locks the session
 
-The reviewer never writes to the PR's own branch: edits land on a fresh branch
-and a new PR targets the original PR's head branch (non-blocking review).
+With no pending edits, "Submit" posts a formal GitHub approval on the
+**original** developer PR. With pending edits, it commits them to the
+**current** review branch/PR — creating either as needed (REQ-18) — and the
+session stays open for further rounds (no terminal "submitted" status).
 
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
-| R9.1 | happy | I/E | Submitting with edits creates one fresh branch, one commit, and one PR targeting the PR's head branch, then locks the session as submitted |
+| R9.1 | happy | I/E | Submitting with edits creates one branch, one commit, and one PR targeting the PR's head branch on a first submit; the session stays active and remains editable afterward |
 | R9.2 | happy | I | Several edited files are delivered as one commit, not many |
-| R9.3 | edge | I/E | Submitting with no edits still closes the session cleanly, opening no branch or PR |
+| R9.3 | edge | I/E | Submitting with no pending edits approves the original PR instead, opening no branch or PR |
 
 ---
 
@@ -128,12 +130,11 @@ The reviewer's commit must touch only the lines they actually changed; untouched
 
 ---
 
-## REQ-12 — A submitted session is read-only
+## REQ-12 — *(removed)*
 
-| # | Type | Lvl | Behavior |
-|---|------|-----|----------|
-| R12.1 | unhappy | I/E | Editing a submitted session is refused |
-| R12.2 | unhappy | I | Re-submitting an already-submitted session is refused |
+There is no post-submit lock: a session never transitions to a terminal
+"submitted" status, so it stays editable through any number of submits. See
+REQ-9 and REQ-18–20 for the replacement behavior.
 
 ---
 
@@ -192,7 +193,48 @@ their own session.
 | R17.1 | happy | I/E | An anchored comment and a free comment can be created and are listed back |
 | R17.2 | unhappy | I | A comment requires a non-empty body; a comment can be resolved and deleted |
 | R17.3 | unhappy | I | A session cannot read, resolve, or delete another session's comments |
-| R17.4 | edge | I/E | After submission, existing comments stay readable but no new comment can be added |
+
+---
+
+## REQ-18 — Same-PR re-submission reuses the current review branch/PR
+
+Re-submissions land on the **same** review branch/PR rather than spawning a
+new pair every time. Selection follows the merge-state matrix: an open review
+PR reuses both branch and PR (B1); a merged review PR whose branch is still
+alive reuses the branch but opens a new PR (B2); a merged review PR whose
+branch was deleted creates a fresh branch (off the target branch) and a new PR
+(B3).
+
+| # | Type | Lvl | Behavior |
+|---|------|-----|----------|
+| R18.1 | happy | I | (B1) Re-submitting while the review PR is open adds a commit to the same branch and opens no new PR |
+| R18.2 | edge | I | (B2) Re-submitting after the review PR merged, with its branch still alive, reuses the branch but opens a new PR |
+| R18.3 | edge | I | (B3) Re-submitting after the review PR merged and its branch deleted creates a fresh branch off the target branch and a new PR |
+
+---
+
+## REQ-19 — "Approve" posts a GitHub review on the original PR
+
+With no pending edits, submitting posts a formal `APPROVE` review on the
+**original** developer PR (not the review PR). It writes no branch/commit and
+opens no PR; the review-PR link, if any, stays usable afterward.
+
+| # | Type | Lvl | Behavior |
+|---|------|-----|----------|
+| R19.1 | unhappy | I | If posting the approval fails, the session is left unchanged (no `approved_at`, still active) |
+
+---
+
+## REQ-20 — Baseline advance after a commit-submit
+
+Every file committed in a submit round has its dirty baseline reset, so the
+next round starts clean — and a reused branch is never deleted on failure
+(only a branch created in that same call is).
+
+| # | Type | Lvl | Behavior |
+|---|------|-----|----------|
+| R20.1 | happy | I | After a commit-submit, committed files are no longer dirty and the next no-edit submit approves rather than re-committing |
+| R20.2 | unhappy | I | A commit failure while reusing an existing review branch (B1) never deletes that branch |
 
 ---
 
@@ -208,15 +250,18 @@ their own session.
 | R6 Read files | R6.1–R6.3 | ✓ | ✓ |
 | R7 Edit durability | R7.1–R7.2 | ✓ | ✓ |
 | R8 Progress guard | R8.1–R8.2 | ✓ | ✓ |
-| R9 Submit & open PR | R9.1–R9.3 | ✓ | ✓ |
+| R9 Submit: approve or commit | R9.1–R9.3 | ✓ | ✓ |
 | R10 Minimal diff | R10.1–R10.3 | ✓ | ✓ |
 | R11 Conflict safety | R11.1–R11.3 | ✓ | ✓ |
-| R12 Read-only lock | R12.1–R12.2 | — | ✓ |
+| R12 *(removed)* | — | — | — |
 | R13 Revoked link | R13.1 | — | ✓ |
 | R14 Diagrams | R14.1 | ✓ | — |
 | R15 Change awareness | R15.1–R15.2 | ✓ | — |
 | R16 Three-way reconcile | R16.1–R16.3 | ✓ | ✓ |
-| R17 Comments | R17.1–R17.4 | ✓ | ✓ |
+| R17 Comments | R17.1–R17.3 | ✓ | ✓ |
+| R18 Same-PR re-submission | R18.1–R18.3 | ✓ | ✓ |
+| R19 Approve posts GitHub review | R19.1 | — | ✓ |
+| R20 Baseline advance | R20.1–R20.2 | ✓ | ✓ |
 
 Every requirement has at least one test; every requirement with a meaningful failure mode has a negative test; the highest-risk business logic (submission, commit integrity, conflict safety) carries its edge cases.
 
@@ -233,4 +278,5 @@ Every requirement has at least one test; every requirement with a meaningful fai
 | Large PR (markdown spanning multiple result pages) | R3.3 |
 | A file edited to change one line; another with repeated identical lines; a very large file | R10.1–R10.3 |
 | Markdown file with a mermaid block | R14.1 |
-| Sessions seeded in active / submitted / revoked states | R12, R13, and state-dependent checks |
+| Sessions seeded in active / revoked states | R13 and other state-dependent checks |
+| Review PR fixture (open, or merged with branch alive/deleted) | R18.1–R18.3, R20.2 |

@@ -133,6 +133,37 @@ async function deleteBranch(owner, repo, branch) {
   await octokit.git.deleteRef({ owner, repo, ref: `heads/${branch}` });
 }
 
+// Lightweight PR state for the re-submission matrix.
+// octokit.pulls.get returns { state: 'open'|'closed', merged: bool, ... }.
+async function getPRState(owner, repo, prNumber) {
+  const octokit = getOctokit();
+  const { data } = await octokit.pulls.get({ owner, repo, pull_number: prNumber });
+  return { state: data.state, merged: !!data.merged };
+}
+
+// True if heads/<branch> exists. 404 → false; other errors propagate.
+async function branchExists(owner, repo, branch) {
+  const octokit = getOctokit();
+  try {
+    await octokit.git.getRef({ owner, repo, ref: `heads/${branch}` });
+    return true;
+  } catch (err) {
+    if (err.status === 404) return false;
+    throw err;
+  }
+}
+
+// Post an APPROVE review on the ORIGINAL developer PR (unblocks merge button).
+// Returns { id, html_url }.
+async function approvePullRequest(owner, repo, prNumber, body) {
+  const octokit = getOctokit();
+  const { data } = await octokit.pulls.createReview({
+    owner, repo, pull_number: prNumber, event: 'APPROVE',
+    body: body || 'Approved via review tool.',
+  });
+  return { id: data.id, html_url: data.html_url };
+}
+
 module.exports = {
   getPR,
   getPRFiles,
@@ -142,4 +173,7 @@ module.exports = {
   createBranch,
   createPullRequest,
   deleteBranch,
+  getPRState,
+  branchExists,
+  approvePullRequest,
 };
