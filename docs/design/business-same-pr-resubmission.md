@@ -385,10 +385,10 @@ else:                btn.textContent = 'Approve'
 - **Remove** `showSubmittedState()`'s locking behavior. After a `submitted`
   response: keep the editor editable, show a **persistent banner** linking
   `submitted_pr_url`. The business reviewer doesn't know what a "PR", branch,
-  or "commit" is, so the banner names none of that and instead states the
-  outcome plainly, e.g. `Your edits have been sent to the development team for
-  implementation. [View on GitHub]`. Then `refreshSubmitButton()` (baselines
-  advanced ⇒ reverts to "Approve").
+  "commit", or "GitHub" is, so the banner names none of that and instead
+  states the outcome plainly, e.g. `Your edits have been sent to the
+  development team for implementation. [View details]`. Then
+  `refreshSubmitButton()` (baselines advanced ⇒ reverts to "Approve").
 - After an `approved` response: toast "Approval sent to the developers", set
   `approved_at` locally, `refreshSubmitButton()` → "Approved ✓".
 - The confirm modal copy that says *"Once you submit, you will not be able to edit

@@ -1127,7 +1127,7 @@
     const banner = document.getElementById('status-banner');
     if (sessionData?.submitted_pr_url) {
       banner.className = 'submitted';
-      banner.innerHTML = `Your edits have been sent to the development team for implementation. <a href="${sessionData.submitted_pr_url}" target="_blank" rel="noopener">View on GitHub</a>`;
+      banner.innerHTML = `Your edits have been sent to the development team for implementation. <a href="${sessionData.submitted_pr_url}" target="_blank" rel="noopener">View details</a>`;
     } else {
       banner.className = '';
       banner.textContent = '';
