@@ -2,7 +2,7 @@
 
 **Scope:** Functional correctness only. Out of scope: security, performance, code quality, UX.
 
-**Approach:** Tests are organized by **business requirement**, not by code structure. Each test asserts *observable behavior* a stakeholder would recognize ("the reviewer cannot edit an approved session"), never an implementation detail (field names, SQL clauses, helper-function internals). This keeps the suite meaningful and refactor-resistant: every test traces to a rule the product must honor.
+**Approach:** Tests are organized by **business requirement**, not by code structure. Each test asserts *observable behavior* a stakeholder would recognize ("the reviewer cannot edit a revoked session"), never an implementation detail (field names, SQL clauses, helper-function internals). This keeps the suite meaningful and refactor-resistant: every test traces to a rule the product must honor.
 
 **Suggested level** per test: **U** = pure-logic unit · **I** = API/integration · **E** = end-to-end browser. This is guidance for whoever implements them, not part of the assertion.
 
