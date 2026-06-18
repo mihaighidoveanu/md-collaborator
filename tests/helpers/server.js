@@ -46,9 +46,13 @@ async function startTestServer({ github } = {}) {
       head_sha: overrides.head_sha || 'sha-1',
       status: overrides.status || 'active',
       created_at: overrides.created_at || Date.now(),
+      submitted_branch: overrides.submitted_branch || null,
+      submitted_pr_number: overrides.submitted_pr_number || null,
+      submitted_pr_url: overrides.submitted_pr_url || null,
+      approved_at: overrides.approved_at || null,
     };
-    db.prepare(`INSERT INTO sessions (id, token, owner, repo, pr_number, pr_title, head_branch, head_sha, status, created_at)
-      VALUES (@id,@token,@owner,@repo,@pr_number,@pr_title,@head_branch,@head_sha,@status,@created_at)`).run(s);
+    db.prepare(`INSERT INTO sessions (id, token, owner, repo, pr_number, pr_title, head_branch, head_sha, status, created_at, submitted_branch, submitted_pr_number, submitted_pr_url, approved_at)
+      VALUES (@id,@token,@owner,@repo,@pr_number,@pr_title,@head_branch,@head_sha,@status,@created_at,@submitted_branch,@submitted_pr_number,@submitted_pr_url,@approved_at)`).run(s);
     return s;
   }
 

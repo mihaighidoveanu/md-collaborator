@@ -72,6 +72,7 @@ function createDb(dbPath) {
   try { db.exec('ALTER TABLE sessions ADD COLUMN submitted_pr_number INTEGER'); } catch {}
   try { db.exec('ALTER TABLE sessions ADD COLUMN submitted_pr_url TEXT'); } catch {}
   try { db.exec('ALTER TABLE sessions ADD COLUMN submitted_branch TEXT'); } catch {}
+  try { db.exec('ALTER TABLE sessions ADD COLUMN approved_at INTEGER'); } catch {}
   return db;
 }
 

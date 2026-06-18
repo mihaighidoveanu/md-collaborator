@@ -5,7 +5,10 @@ const { createFakeGithub } = require('../helpers/fakeGithub');
 
 // Build a fake configured with one open PR plus a session row already pointing
 // at it, returning everything a review-flow test needs.
-async function setup({ files, contents, status = 'active', headShas, commitShouldFail, submitShouldFail, prShouldFail, headShaFailTimes } = {}) {
+async function setup({
+  files, contents, status = 'active', headShas, commitShouldFail, submitShouldFail,
+  prShouldFail, approveShouldFail, headShaFailTimes, existingBranches, extraPrs, submitted,
+} = {}) {
   files = files || [
     { filename: 'docs/intro.md', status: 'modified' },
     { filename: 'README.md', status: 'added' },
@@ -14,15 +17,21 @@ async function setup({ files, contents, status = 'active', headShas, commitShoul
   const github = createFakeGithub({
     prs: {
       'acme/docs#1': { state: 'open', title: 'Docs', head: { ref: 'feature', sha: 'sha-1' }, files, contents },
+      ...(extraPrs || {}),
     },
     headShas,
     commitShouldFail,
     submitShouldFail,
     prShouldFail,
+    approveShouldFail,
     headShaFailTimes,
+    existingBranches,
   });
   const ctx = await startTestServer({ github });
-  const session = ctx.seedSession({ owner: 'acme', repo: 'docs', pr_number: 1, head_branch: 'feature', head_sha: 'sha-1', status });
+  const session = ctx.seedSession({
+    owner: 'acme', repo: 'docs', pr_number: 1, head_branch: 'feature', head_sha: 'sha-1', status,
+    ...(submitted || {}),
+  });
   return { ctx, github, session };
 }
 
@@ -224,9 +233,10 @@ test('R16.3 an edited file whose upstream has not moved stays a plain view (no n
   assert.equal(github.calls.getFileContent.length, 0, 'no content fetch needed');
 });
 
-// REQ-9 — Submission opens a PR and closes the session.
+// REQ-9 — Submission: approve when there are no pending edits, or commit (and
+// open/reuse a PR) when there are.
 
-test('R9.1 submitting with edits opens one branch, one commit, and one PR; session is submitted', async () => {
+test('R9.1 submitting with edits opens one branch, one commit, and one PR; the session stays active', async () => {
   active = await setup();
   const { ctx, github, session } = active;
 
@@ -235,6 +245,7 @@ test('R9.1 submitting with edits opens one branch, one commit, and one PR; sessi
 
   const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
   assert.equal(res.status, 200);
+  assert.equal(res.json.action, 'submitted');
   assert.equal(github.calls.createBranch.length, 1, 'one new branch was created');
   assert.equal(github.calls.commitChanges.length, 1, 'one commit was written');
   assert.equal(github.calls.createPullRequest.length, 1, 'one PR was opened');
@@ -251,12 +262,17 @@ test('R9.1 submitting with edits opens one branch, one commit, and one PR; sessi
   assert.equal(res.json.pr_url, pr.html_url);
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
-  assert.equal(meta.json.status, 'submitted', 'session is locked as submitted');
+  assert.equal(meta.json.status, 'active', 'the session is never locked by submitting');
 
   // The opened PR is persisted on the session row (survives reload).
   const row = ctx.db.prepare('SELECT submitted_pr_number, submitted_branch FROM sessions WHERE id = ?').get(session.id);
   assert.equal(row.submitted_pr_number, pr.number, 'the PR is recorded on the session');
   assert.equal(row.submitted_branch, newBranch, 'the branch is recorded on the session');
+
+  // The business can keep editing after a submit (D4) — no terminal lock.
+  const again = await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited again\n', originalContent: '# Intro\nhello\n' } });
+  assert.equal(again.status, 200, 'editing after a submit is still allowed');
 });
 
 test('R9.2 several edited files are delivered as one commit, not many', async () => {
@@ -273,19 +289,30 @@ test('R9.2 several edited files are delivered as one commit, not many', async ()
   assert.equal(github.calls.commitChanges[0].editedFiles.length, 2, 'both files in that one commit');
 });
 
-test('R9.3 submitting with no edits closes the session cleanly with no branch or PR', async () => {
+test('R9.3 submitting with no pending edits approves the original PR, opening no branch or PR', async () => {
   active = await setup();
   const { ctx, github, session } = active;
 
   const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
   assert.equal(res.status, 200, 'submission succeeds with no edits');
-  assert.equal(res.json.submitted, false, 'nothing was submitted');
+  assert.equal(res.json.action, 'approved', 'no pending edits approves rather than commits');
+  assert.equal(github.calls.approvePullRequest.length, 1, 'one approval was posted');
+  assert.equal(github.calls.approvePullRequest[0].number, session.pr_number, 'approval targets the original PR');
   assert.equal(github.calls.createBranch.length, 0, 'no branch created');
   assert.equal(github.calls.commitChanges.length, 0, 'nothing is committed');
   assert.equal(github.calls.createPullRequest.length, 0, 'no PR opened');
 
+  const row = ctx.db.prepare('SELECT approved_at FROM sessions WHERE id = ?').get(session.id);
+  assert.ok(row.approved_at, 'approved_at is recorded');
+
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
-  assert.equal(meta.json.status, 'submitted', 'session is closed as submitted');
+  assert.equal(meta.json.status, 'active', 'the session is never locked');
+
+  // The business can subsequently edit and submit changes after an approval.
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited after approval\n', originalContent: '# Intro\nhello\n' } });
+  const res2 = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res2.json.action, 'submitted', 'a later edit can still be submitted');
 });
 
 // REQ-11 — Submission never overwrites newer work on the branch.
@@ -304,7 +331,7 @@ test('R11.1 if the branch advanced, submission succeeds off the live head SHA', 
   assert.equal(github.calls.commitChanges[0].headSha, 'sha-2-newer', 'commit parents the live head');
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
-  assert.equal(meta.json.status, 'submitted', 'session closes as submitted');
+  assert.equal(meta.json.status, 'active', 'the session stays active after submitting');
 });
 
 test('R11.2 if the commit to GitHub fails, the session stays open and the branch is cleaned up', async () => {
@@ -369,24 +396,134 @@ test('R11.4 a transient blip resolving the live head is retried, and submission 
   assert.equal(github.calls.createPullRequest.length, 1, 'the PR is opened once the read succeeds');
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
-  assert.equal(meta.json.status, 'submitted', 'session closes as submitted');
+  assert.equal(meta.json.status, 'active', 'the session stays active after submitting');
 });
 
-// REQ-12 — A submitted session is read-only.
+// REQ-18 — Re-submission reuses the current review branch/PR per the
+// merge-state matrix (B1/B2/B3) instead of spawning a new pair every time.
 
-test('R12.1 editing a submitted session is refused', async () => {
-  active = await setup({ status: 'submitted' });
-  const { ctx, session } = active;
-  const res = await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
-    { body: { content: 'x', originalContent: 'y' } });
-  assert.equal(res.status, 403);
-});
+function setupWithReviewPr(overrides = {}) {
+  return setup({
+    extraPrs: {
+      'acme/docs#2000': { state: 'open', merged: false, head: { ref: 'review/pr1-abcd1234', sha: 'review-sha-1' } },
+    },
+    existingBranches: ['review/pr1-abcd1234'],
+    submitted: {
+      submitted_branch: 'review/pr1-abcd1234',
+      submitted_pr_number: 2000,
+      submitted_pr_url: 'https://github.com/acme/docs/pull/2000',
+    },
+    ...overrides,
+  });
+}
 
-test('R12.2 re-submitting an already-submitted session is refused', async () => {
-  active = await setup({ status: 'submitted' });
-  const { ctx, session } = active;
+test('R18.1 (B1) re-submit while the review PR is open reuses the same branch and PR', async () => {
+  active = await setupWithReviewPr();
+  const { ctx, github, session } = active;
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nsecond round\n', originalContent: '# Intro\nhello\n' } });
+
   const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
-  assert.equal(res.status, 403);
+  assert.equal(res.status, 200);
+  assert.equal(res.json.action, 'submitted');
+  assert.equal(github.calls.createBranch.length, 0, 'no new branch created');
+  assert.equal(github.calls.createPullRequest.length, 0, 'no new PR opened');
+  assert.equal(github.calls.commitChanges.length, 1, 'exactly one commit');
+  assert.equal(github.calls.commitChanges[0].branch, 'review/pr1-abcd1234', 'commit lands on the existing review branch');
+  assert.equal(github.calls.commitChanges[0].headSha, 'review-sha-1', 'commit is off the review branch\'s live head');
+  assert.equal(res.json.pr_number, 2000, 'the existing PR is reused');
+});
+
+test('R18.2 (B2) re-submit after the review PR merged, branch still alive: reuses the branch, opens a new PR', async () => {
+  active = await setupWithReviewPr();
+  const { ctx, github, session } = active;
+  github.mergePr('acme', 'docs', 2000, { deleteBranch: false });
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nsecond round\n', originalContent: '# Intro\nhello\n' } });
+
+  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res.status, 200);
+  assert.equal(github.calls.createBranch.length, 0, 'no new branch — the old one is still alive');
+  assert.equal(github.calls.commitChanges.length, 1);
+  assert.equal(github.calls.commitChanges[0].branch, 'review/pr1-abcd1234', 'commit lands on the reused branch');
+  assert.equal(github.calls.createPullRequest.length, 1, 'a fresh PR is opened since the old one merged');
+  assert.equal(github.calls.createPullRequest[0].head, 'review/pr1-abcd1234');
+  assert.equal(github.calls.createPullRequest[0].base, 'feature');
+
+  const row = ctx.db.prepare('SELECT submitted_pr_number FROM sessions WHERE id = ?').get(session.id);
+  assert.notEqual(row.submitted_pr_number, 2000, 'the session now points at the new PR');
+});
+
+test('R18.3 (B3) re-submit after the review PR merged and its branch deleted: creates a fresh branch off the target branch', async () => {
+  active = await setupWithReviewPr();
+  const { ctx, github, session } = active;
+  github.mergePr('acme', 'docs', 2000, { deleteBranch: true });
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nthird round\n', originalContent: '# Intro\nhello\n' } });
+
+  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res.status, 200);
+  assert.equal(github.calls.createBranch.length, 1, 'a fresh branch is created');
+  assert.equal(github.calls.createBranch[0].fromSha, 'sha-1', 'branched off the target branch\'s live head');
+  assert.notEqual(github.calls.createBranch[0].branchName, 'review/pr1-abcd1234', 'not the deleted branch name');
+  assert.equal(github.calls.commitChanges.length, 1);
+  assert.equal(github.calls.createPullRequest.length, 1, 'a fresh PR is opened');
+});
+
+// REQ-19 — "Approve" posts a GitHub review on the original PR (D1).
+
+test('R19.1 a failed approval leaves the session unchanged', async () => {
+  active = await setup({ approveShouldFail: true });
+  const { ctx, session } = active;
+
+  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res.status, 500);
+
+  const row = ctx.db.prepare('SELECT approved_at FROM sessions WHERE id = ?').get(session.id);
+  assert.equal(row.approved_at, null, 'no approval was recorded');
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.status, 'active', 'the session is unaffected by the failed approval');
+});
+
+// REQ-20 — A successful commit-submit advances the dirty baseline (D3), and a
+// reused-branch commit failure never deletes the branch it did not create (D5).
+
+test('R20.1 after a commit-submit, committed files are no longer dirty and the next no-edit submit approves', async () => {
+  active = await setup();
+  const { ctx, github, session } = active;
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+  await ctx.request('POST', `/review/api/${session.token}/submit`);
+
+  const row = ctx.db.prepare('SELECT dirty, original_content, content FROM file_edits WHERE session_id = ? AND file_path = ?')
+    .get(session.id, 'docs/intro.md');
+  assert.equal(row.dirty, 0, 'the committed file is no longer dirty');
+  assert.equal(row.original_content, row.content, 'the baseline advances to the committed content');
+
+  // The next submit with no further edits approves rather than re-committing.
+  const res2 = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res2.json.action, 'approved');
+  assert.equal(github.calls.commitChanges.length, 1, 'still just the one commit from before');
+});
+
+test('R20.2 a commit failure on a re-submit (B1) leaves the reused branch intact', async () => {
+  active = await setupWithReviewPr({ commitShouldFail: true });
+  const { ctx, github, session } = active;
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nsecond round\n', originalContent: '# Intro\nhello\n' } });
+
+  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res.status, 500);
+  assert.equal(github.calls.deleteBranch.length, 0, 'a reused branch is never deleted on failure');
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.status, 'active');
 });
 
 // REQ-13 — A revoked link grants no access.

@@ -16,6 +16,7 @@ function createFakeGithub(config = {}) {
   const calls = {
     getPR: [], getPRFiles: [], getFileContent: [], commitChanges: [], getCurrentHeadSha: [],
     createBranch: [], createPullRequest: [], deleteBranch: [],
+    getPRState: [], branchExists: [], approvePullRequest: [],
   };
   // headShas lets a test simulate the branch advancing after session creation.
   const headShas = config.headShas || {}; // key `${owner}/${repo}@${branch}` -> sha
@@ -107,6 +108,24 @@ function createFakeGithub(config = {}) {
       existingBranches.delete(branch);
     },
 
+    async getPRState(owner, repo, number) {
+      calls.getPRState.push({ owner, repo, number });
+      const p = pr(owner, repo, number);
+      return { state: p.state || 'open', merged: !!p.merged };
+    },
+
+    async branchExists(owner, repo, branch) {
+      calls.branchExists.push({ owner, repo, branch });
+      return existingBranches.has(branch);
+    },
+
+    async approvePullRequest(owner, repo, number, body) {
+      calls.approvePullRequest.push({ owner, repo, number, body });
+      if (config.approveShouldFail) throw new Error('GitHub approval failed');
+      const id = 5000 + calls.approvePullRequest.length;
+      return { id, html_url: `https://github.com/${owner}/${repo}/pull/${number}#pullrequestreview-${id}` };
+    },
+
     // Test-only accessors
     calls,
     // Test-only: simulate a new upstream commit landing on a branch. Advances
@@ -117,6 +136,17 @@ function createFakeGithub(config = {}) {
       headShas[`${owner}/${repo}@${branch}`] = newSha;
       for (const [filePath, content] of Object.entries(fileChanges)) {
         contentOverrides[filePath] = content;
+      }
+    },
+
+    // Test-only: simulate the review PR getting merged on GitHub, optionally
+    // along with its branch being deleted (GitHub's "delete branch" button).
+    mergePr(owner, repo, number, { deleteBranch: shouldDeleteBranch = false } = {}) {
+      const p = pr(owner, repo, number);
+      p.state = 'closed';
+      p.merged = true;
+      if (shouldDeleteBranch && p.head) {
+        existingBranches.delete(p.head.ref);
       }
     },
   };

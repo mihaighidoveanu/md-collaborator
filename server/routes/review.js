@@ -8,25 +8,28 @@ const createSessionMiddleware = require('../middleware/session');
 // Columns returned for a comment, shared by the list and create endpoints.
 const COMMENT_COLS = 'id, file_path, anchor_text, paragraph_index, body, resolved, created_at';
 
-// Compose the PR body so the reviewer's comments travel with the pull request.
-// Anchored comments quote the paragraph they refer to; free comments are listed
-// on their own. (Inline GitHub review comments are intentionally out of scope.)
-function buildPrBody(session, comments) {
-  const lines = [
-    `Review edits imported from PR #${session.pr_number}.`,
-  ];
-  if (comments && comments.length) {
-    lines.push('', '## Reviewer comments', '');
-    for (const c of comments) {
-      const where = c.file_path ? `\`${c.file_path}\`` : 'General';
-      lines.push(`- **${where}**`);
-      if (c.anchor_text) {
-        lines.push(`  > ${String(c.anchor_text).split('\n').join('\n  > ')}`);
-      }
-      lines.push(`  ${c.body}`);
+// Render the reviewer's comments as a markdown section so they travel with
+// the pull request / approval. Anchored comments quote the paragraph they
+// refer to; free comments are listed on their own. (Inline GitHub review
+// comments are intentionally out of scope.) Returns '' when there are none.
+function commentsSection(comments) {
+  if (!comments || !comments.length) return '';
+  const lines = ['', '## Reviewer comments', ''];
+  for (const c of comments) {
+    const where = c.file_path ? `\`${c.file_path}\`` : 'General';
+    lines.push(`- **${where}**`);
+    if (c.anchor_text) {
+      lines.push(`  > ${String(c.anchor_text).split('\n').join('\n  > ')}`);
     }
+    lines.push(`  ${c.body}`);
   }
   return lines.join('\n');
+}
+
+// Compose the review PR's body so the reviewer's comments travel with it.
+function buildPrBody(session, comments) {
+  return [`Review edits imported from PR #${session.pr_number}.`, commentsSection(comments)]
+    .filter(Boolean).join('\n');
 }
 
 function createReviewRouter({ db, github }) {
@@ -225,9 +228,20 @@ function createReviewRouter({ db, github }) {
     res.json({ ok: true });
   });
 
-  // Submit — open a pull request from the reviewer's edits, then close the
-  // session. The reviewer never writes to the PR's own branch: changes land on
-  // a fresh branch and a PR targets the original PR's head branch (D1/D2).
+  // Build the body for a no-edit GitHub approval review, carrying the
+  // reviewer's comments along (mirrors buildPrBody's comment formatting).
+  function buildApprovalBody(session) {
+    const comments = db.prepare(
+      'SELECT file_path, anchor_text, body FROM comments WHERE session_id = ? ORDER BY created_at'
+    ).all(session.id);
+    return ['Approved via review tool.', commentsSection(comments)].filter(Boolean).join('\n');
+  }
+
+  // Submit — with no pending edits, post a GitHub approval on the original PR
+  // (D1). With pending edits, commit them to the current review branch/PR,
+  // creating either as needed per the re-submission matrix (D2/D5). The
+  // session is never locked: it stays 'active' through any number of submits
+  // (D4), and a committed round resets the dirty baselines (D3).
   router.post('/api/:token/submit', requireSession, async (req, res) => {
     const { session } = req;
 
@@ -235,67 +249,98 @@ function createReviewRouter({ db, github }) {
       'SELECT file_path, content, original_content FROM file_edits WHERE session_id = ? AND dirty = 1'
     ).all(session.id);
 
-    // Submitting with no edits still closes the session cleanly, opening no PR.
+    // ── APPROVE path (D1): no pending edits → approve the ORIGINAL PR ──
     if (dirtyFiles.length === 0) {
-      db.prepare("UPDATE sessions SET status = 'submitted' WHERE id = ?").run(session.id);
-      return res.json({ ok: true, submitted: false });
+      try {
+        const review = await github.approvePullRequest(
+          session.owner, session.repo, session.pr_number,
+          buildApprovalBody(session)
+        );
+        db.prepare('UPDATE sessions SET approved_at = ? WHERE id = ?').run(Date.now(), session.id);
+        return res.json({ ok: true, action: 'approved', review_url: review.html_url });
+      } catch (err) {
+        return res.status(500).json({ error: err.message }); // session unchanged
+      }
     }
 
-    // If we fail after creating the branch but before the PR exists, this holds
-    // the branch to delete so a failed submit leaves nothing behind.
-    let branchToCleanup = null;
+    // ── SUBMIT-CHANGES path: resolve target branch/PR via the matrix (D2) ──
+    let branch = session.submitted_branch;
+    let prNumber = session.submitted_pr_number;
+    let prUrl = session.submitted_pr_url;
+    let needNewBranch = false;
+    let needNewPr = false;
+
+    if (!branch) {
+      needNewBranch = true; needNewPr = true; // first submit
+    } else {
+      const { merged } = await withRetry(() =>
+        github.getPRState(session.owner, session.repo, prNumber));
+      const alive = await withRetry(() =>
+        github.branchExists(session.owner, session.repo, branch));
+      if (merged) {
+        needNewPr = true;                 // merged → new PR
+        if (!alive) needNewBranch = true; //   + branch gone → new branch (B3)
+        // alive → reuse branch, new PR (B2)
+      } else if (!alive) {
+        needNewBranch = true; needNewPr = true; // edge: open PR but branch deleted
+      }
+      // else: open PR + alive branch → reuse both (B1), needNew* stay false
+    }
+
+    // Pick the base SHA to commit on:
+    //   new branch   → off the TARGET branch (session.head_branch) live head
+    //   reuse branch → off the REVIEW branch live head (picks up developer commits, D5)
+    let createdBranchThisCall = null;
     try {
-      // Commit off the live head so we never clobber work that landed since the
-      // session was created — the three-way view already surfaced any drift.
-      // A transient blip on this read is retried; if it stays down we fail the
-      // submit (session stays open) rather than risk committing off a stale base.
-      const liveHeadSha = await withRetry(
-        () => github.getCurrentHeadSha(session.owner, session.repo, session.head_branch)
-      );
+      let baseSha;
+      if (needNewBranch) {
+        baseSha = await withRetry(() =>
+          github.getCurrentHeadSha(session.owner, session.repo, session.head_branch));
+        branch = await github.createBranch(
+          session.owner, session.repo,
+          `review/pr${session.pr_number}-${session.token.slice(0, 8)}`, baseSha);
+        createdBranchThisCall = branch; // only THIS gets cleaned up on failure
+      } else {
+        baseSha = await withRetry(() =>
+          github.getCurrentHeadSha(session.owner, session.repo, branch));
+      }
 
-      const branchName = `review/pr${session.pr_number}-${session.token.slice(0, 8)}`;
-      const newBranch = await github.createBranch(session.owner, session.repo, branchName, liveHeadSha);
-      branchToCleanup = newBranch;
-
-      await github.commitChanges(
-        session.owner,
-        session.repo,
-        newBranch,
-        liveHeadSha,
+      const commitSha = await github.commitChanges(
+        session.owner, session.repo, branch, baseSha,
         dirtyFiles.map(f => ({
           filePath: f.file_path,
           content: reconstructMinimalContent(f.original_content, f.content),
-        }))
-      );
+        })));
 
-      const comments = db.prepare(
-        'SELECT file_path, anchor_text, body FROM comments WHERE session_id = ? ORDER BY created_at'
-      ).all(session.id);
-      const body = buildPrBody(session, comments);
-
-      const pr = await github.createPullRequest(
-        session.owner,
-        session.repo,
-        newBranch,
-        session.head_branch,
-        `Review: ${session.pr_title}`,
-        body
-      );
-      // The PR now owns the branch — past this point we must not delete it.
-      branchToCleanup = null;
-
-      db.prepare(
-        "UPDATE sessions SET status = 'submitted', submitted_pr_number = ?, submitted_pr_url = ?, submitted_branch = ? WHERE id = ?"
-      ).run(pr.number, pr.html_url, newBranch, session.id);
-
-      res.json({ ok: true, submitted: true, pr_number: pr.number, pr_url: pr.html_url });
-    } catch (err) {
-      // Best-effort cleanup of a half-created branch so a retry starts clean and
-      // no orphan branch is left behind. Never mask the original error.
-      if (branchToCleanup) {
-        try { await github.deleteBranch(session.owner, session.repo, branchToCleanup); } catch {}
+      if (needNewPr) {
+        const comments = db.prepare(
+          'SELECT file_path, anchor_text, body FROM comments WHERE session_id = ? ORDER BY created_at'
+        ).all(session.id);
+        const pr = await github.createPullRequest(
+          session.owner, session.repo, branch, session.head_branch,
+          `Review: ${session.pr_title}`, buildPrBody(session, comments));
+        createdBranchThisCall = null; // PR now owns the branch
+        prNumber = pr.number; prUrl = pr.html_url;
       }
-      res.status(500).json({ error: err.message });
+
+      // Persist current review branch/PR (overwrite — they are "current", not one-shot).
+      db.prepare(`UPDATE sessions
+         SET submitted_branch = ?, submitted_pr_number = ?, submitted_pr_url = ?
+         WHERE id = ?`).run(branch, prNumber, prUrl, session.id);
+
+      // D3 — advance baselines so the next round starts clean.
+      const advance = db.prepare(`UPDATE file_edits
+         SET dirty = 0, original_content = content, base_sha = ?
+         WHERE session_id = ? AND file_path = ?`);
+      for (const f of dirtyFiles) advance.run(commitSha, session.id, f.file_path);
+
+      // status stays 'active' (D4) — never set 'submitted'.
+      res.json({ ok: true, action: 'submitted', pr_number: prNumber, pr_url: prUrl, branch });
+    } catch (err) {
+      if (createdBranchThisCall) {
+        try { await github.deleteBranch(session.owner, session.repo, createdBranchThisCall); } catch {}
+      }
+      res.status(500).json({ error: err.message }); // session stays active
     }
   });
 
