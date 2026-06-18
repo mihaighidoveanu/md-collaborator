@@ -6,7 +6,7 @@
 
 **Suggested level** per test: **U** = pure-logic unit · **I** = API/integration · **E** = end-to-end browser. This is guidance for whoever implements them, not part of the assertion.
 
-**Total: 37 tests.**
+**Total: 41 tests.**
 
 > ⚠️ Two tests encode *intended* behavior that the current implementation does not yet satisfy (marked **[drives fix]**). They are expected to fail until the code is corrected.
 
@@ -181,6 +181,21 @@ they can reconcile rather than silently clobber.
 
 ---
 
+## REQ-17 — The reviewer can leave explanatory comments
+
+Comments may be anchored to a paragraph or left free (general). They are listed,
+can be resolved and deleted, travel with the resulting PR, and are scoped to
+their own session.
+
+| # | Type | Lvl | Behavior |
+|---|------|-----|----------|
+| R17.1 | happy | I/E | An anchored comment and a free comment can be created and are listed back |
+| R17.2 | unhappy | I | A comment requires a non-empty body; a comment can be resolved and deleted |
+| R17.3 | unhappy | I | A session cannot read, resolve, or delete another session's comments |
+| R17.4 | edge | I/E | After submission, existing comments stay readable but no new comment can be added |
+
+---
+
 ## Traceability Summary
 
 | Requirement | Tests | Happy | Unhappy/Edge |
@@ -201,6 +216,7 @@ they can reconcile rather than silently clobber.
 | R14 Diagrams | R14.1 | ✓ | — |
 | R15 Change awareness | R15.1–R15.2 | ✓ | — |
 | R16 Three-way reconcile | R16.1–R16.3 | ✓ | ✓ |
+| R17 Comments | R17.1–R17.4 | ✓ | ✓ |
 
 Every requirement has at least one test; every requirement with a meaningful failure mode has a negative test; the highest-risk business logic (submission, commit integrity, conflict safety) carries its edge cases.
 

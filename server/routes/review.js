@@ -270,6 +270,60 @@ function createReviewRouter({ db, github }) {
     }
   });
 
+  // --- Comments (anchored to a paragraph, or free) ---
+
+  // List the session's comments. Readable on an active or submitted session so
+  // they remain visible after the review is submitted.
+  router.get('/api/:token/comments', requireActiveOrSubmitted, (req, res) => {
+    const rows = db.prepare(
+      'SELECT id, file_path, anchor_text, paragraph_index, body, resolved, created_at FROM comments WHERE session_id = ? ORDER BY created_at'
+    ).all(req.session.id);
+    res.json(rows);
+  });
+
+  // Create a comment. Anchored comments carry a file_path + paragraph_index +
+  // anchor_text; a free comment may omit the anchor (and file_path).
+  router.post('/api/:token/comments', requireSession, (req, res) => {
+    const { file_path, anchor_text, paragraph_index, body } = req.body;
+    if (typeof body !== 'string' || !body.trim()) {
+      return res.status(400).json({ error: 'body is required' });
+    }
+    const info = db.prepare(`
+      INSERT INTO comments (session_id, file_path, anchor_text, paragraph_index, body, resolved, created_at)
+      VALUES (?, ?, ?, ?, ?, 0, ?)
+    `).run(
+      req.session.id,
+      typeof file_path === 'string' ? file_path : null,
+      typeof anchor_text === 'string' ? anchor_text : null,
+      Number.isInteger(paragraph_index) ? paragraph_index : null,
+      body,
+      Date.now()
+    );
+    const row = db.prepare(
+      'SELECT id, file_path, anchor_text, paragraph_index, body, resolved, created_at FROM comments WHERE id = ?'
+    ).get(info.lastInsertRowid);
+    res.json(row);
+  });
+
+  // Resolve / unresolve a comment, scoped to this session.
+  router.patch('/api/:token/comments/:id', requireSession, (req, res) => {
+    const { resolved } = req.body;
+    const result = db.prepare(
+      'UPDATE comments SET resolved = ? WHERE id = ? AND session_id = ?'
+    ).run(resolved ? 1 : 0, req.params.id, req.session.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Comment not found' });
+    res.json({ ok: true });
+  });
+
+  // Delete a comment, scoped to this session.
+  router.delete('/api/:token/comments/:id', requireSession, (req, res) => {
+    const result = db.prepare(
+      'DELETE FROM comments WHERE id = ? AND session_id = ?'
+    ).run(req.params.id, req.session.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Comment not found' });
+    res.json({ ok: true });
+  });
+
   return router;
 }
 

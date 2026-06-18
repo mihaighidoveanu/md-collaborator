@@ -378,3 +378,73 @@ test('R13.1 a revoked link cannot read, edit, or submit', async () => {
   assert.equal((await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`, { body: { content: 'x', originalContent: 'y' } })).status, 403, 'cannot edit');
   assert.equal((await ctx.request('POST', `/review/api/${session.token}/submit`)).status, 403, 'cannot submit');
 });
+
+// REQ-17 — A reviewer can leave explanatory comments, anchored or free.
+
+test('R17.1 anchored and free comments are created and listed', async () => {
+  active = await setup();
+  const { ctx, session } = active;
+
+  const anchored = await ctx.request('POST', `/review/api/${session.token}/comments`,
+    { body: { file_path: 'docs/intro.md', paragraph_index: 2, anchor_text: 'hello', body: 'Please clarify this.' } });
+  assert.equal(anchored.status, 200);
+  assert.equal(anchored.json.anchor_text, 'hello');
+  assert.equal(anchored.json.paragraph_index, 2);
+  assert.equal(anchored.json.file_path, 'docs/intro.md');
+  assert.equal(anchored.json.resolved, 0);
+
+  const free = await ctx.request('POST', `/review/api/${session.token}/comments`, { body: { body: 'General note.' } });
+  assert.equal(free.status, 200);
+  assert.equal(free.json.file_path, null, 'a free comment has no file');
+  assert.equal(free.json.anchor_text, null, 'a free comment has no anchor');
+
+  const list = await ctx.request('GET', `/review/api/${session.token}/comments`);
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.json.map(c => c.body), ['Please clarify this.', 'General note.']);
+});
+
+test('R17.2 a comment requires a body; it can be resolved and deleted', async () => {
+  active = await setup();
+  const { ctx, session } = active;
+
+  const blank = await ctx.request('POST', `/review/api/${session.token}/comments`, { body: { body: '   ' } });
+  assert.equal(blank.status, 400, 'a blank body is refused');
+
+  const c = await ctx.request('POST', `/review/api/${session.token}/comments`, { body: { body: 'note' } });
+  const id = c.json.id;
+
+  assert.equal((await ctx.request('PATCH', `/review/api/${session.token}/comments/${id}`, { body: { resolved: true } })).status, 200);
+  let list = await ctx.request('GET', `/review/api/${session.token}/comments`);
+  assert.equal(list.json[0].resolved, 1, 'comment is marked resolved');
+
+  assert.equal((await ctx.request('DELETE', `/review/api/${session.token}/comments/${id}`)).status, 200);
+  list = await ctx.request('GET', `/review/api/${session.token}/comments`);
+  assert.equal(list.json.length, 0, 'comment is gone');
+});
+
+test('R17.3 comments are scoped to their session', async () => {
+  active = await setup();
+  const { ctx, session } = active;
+  const other = ctx.seedSession({ owner: 'acme', repo: 'docs', pr_number: 1, head_branch: 'feature', head_sha: 'sha-1' });
+
+  const c = await ctx.request('POST', `/review/api/${session.token}/comments`, { body: { body: 'mine' } });
+  const id = c.json.id;
+
+  const otherList = await ctx.request('GET', `/review/api/${other.token}/comments`);
+  assert.equal(otherList.json.length, 0, 'not listed under another session');
+  assert.equal((await ctx.request('PATCH', `/review/api/${other.token}/comments/${id}`, { body: { resolved: true } })).status, 404, 'cannot resolve another session\'s comment');
+  assert.equal((await ctx.request('DELETE', `/review/api/${other.token}/comments/${id}`)).status, 404, 'cannot delete another session\'s comment');
+});
+
+test('R17.4 comments stay readable after submit, but new ones are refused', async () => {
+  active = await setup({ status: 'submitted' });
+  const { ctx, session } = active;
+  ctx.db.prepare('INSERT INTO comments (session_id, body, resolved, created_at) VALUES (?,?,0,?)').run(session.id, 'earlier note', Date.now());
+
+  const list = await ctx.request('GET', `/review/api/${session.token}/comments`);
+  assert.equal(list.status, 200);
+  assert.equal(list.json.length, 1, 'existing comments remain visible after submit');
+
+  const post = await ctx.request('POST', `/review/api/${session.token}/comments`, { body: { body: 'too late' } });
+  assert.equal(post.status, 403, 'cannot add a comment to a submitted session');
+});

@@ -85,6 +85,7 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      position: relative;
     }
     #no-file {
       flex: 1;
@@ -273,6 +274,120 @@
       padding: 12px 16px;
     }
 
+    /* Comments */
+    .icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+      color: #57606a;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 7px 9px;
+      cursor: pointer;
+    }
+    .icon-btn:hover:not(:disabled) { background: #f6f8fa; color: #24292e; }
+    .icon-btn:disabled { color: #b1b7bd; cursor: not-allowed; }
+
+    #para-comment-btn {
+      position: absolute;
+      z-index: 50;
+      padding: 3px 5px;
+      box-shadow: 0 1px 3px rgba(27,31,35,0.15);
+    }
+
+    #comments-panel {
+      width: 300px;
+      min-width: 300px;
+      background: #fff;
+      border-left: 1px solid #e1e4e8;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #comments-panel.collapsed { width: 40px; min-width: 40px; }
+    #comments-panel.collapsed #comments-body { display: none; }
+    #comments-panel.collapsed #comments-header span { display: none; }
+    #comments-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-bottom: 1px solid #e1e4e8;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    #comments-toggle {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 15px;
+      color: #6a737d;
+      line-height: 1;
+    }
+    #comments-panel.collapsed #comments-toggle { transform: rotate(180deg); }
+    #comments-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+
+    #composer { padding: 12px 14px; border-bottom: 1px solid #e1e4e8; background: #f6f8fa; }
+    #composer-context {
+      font-size: 12px;
+      color: #6a737d;
+      margin-bottom: 6px;
+      padding-left: 8px;
+      border-left: 3px solid #d0d7de;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 60px;
+      overflow: hidden;
+    }
+    #composer-input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 8px;
+      font: inherit;
+      font-size: 13px;
+      resize: vertical;
+    }
+    #composer-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+    #composer-actions button {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid #d0d7de;
+      background: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #composer-actions .primary { background: #2da44e; color: #fff; border-color: #2da44e; }
+    #composer-actions .primary:hover { background: #2c974b; }
+
+    #comments-list { padding: 8px 0; }
+    #comments-empty { padding: 16px 14px; font-size: 13px; color: #6a737d; }
+    .comment-item { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; }
+    .comment-item.resolved { opacity: 0.6; }
+    .comment-anchor {
+      font-size: 12px;
+      color: #57606a;
+      border-left: 3px solid #d0bff0;
+      padding: 2px 8px;
+      margin-bottom: 6px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      cursor: pointer;
+      max-height: 48px;
+      overflow: hidden;
+    }
+    .comment-anchor:hover { background: #faf8ff; }
+    .comment-anchor.detached { border-left-color: #e1e4e8; color: #8c959f; font-style: italic; }
+    .comment-general { font-size: 11px; color: #6a737d; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .comment-body { font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+    .comment-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 11px; color: #8c959f; }
+    .comment-meta button { background: none; border: none; padding: 0; cursor: pointer; font-size: 11px; color: #0969da; }
+    .comment-meta button:hover { text-decoration: underline; }
+    .paragraph-highlight { background: #fff8c5 !important; transition: background 1.5s; }
+
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -340,6 +455,9 @@
     <span id="pr-title"></span>
   </div>
   <div id="header-actions">
+    <button id="general-comment-btn" class="icon-btn" title="Leave a comment" disabled>
+      <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M3 1.5A1.5 1.5 0 0 0 1.5 3v7A1.5 1.5 0 0 0 3 11.5h2v2.25a.5.5 0 0 0 .82.385L9.4 11.5H13A1.5 1.5 0 0 0 14.5 10V3A1.5 1.5 0 0 0 13 1.5Z"/></svg>
+    </button>
     <button id="save-btn" disabled>Save</button>
     <button id="approve-btn" disabled>Submit for PR</button>
   </div>
@@ -362,6 +480,26 @@
       <div id="reference-body"></div>
     </div>
     <div id="editor-wrap" style="display:none"></div>
+    <button id="para-comment-btn" class="icon-btn" title="Comment on this paragraph" style="display:none">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M3 1.5A1.5 1.5 0 0 0 1.5 3v7A1.5 1.5 0 0 0 3 11.5h2v2.25a.5.5 0 0 0 .82.385L9.4 11.5H13A1.5 1.5 0 0 0 14.5 10V3A1.5 1.5 0 0 0 13 1.5Z"/></svg>
+    </button>
+  </div>
+  <div id="comments-panel">
+    <div id="comments-header">
+      <span>Comments</span>
+      <button id="comments-toggle" title="Collapse">›</button>
+    </div>
+    <div id="comments-body">
+      <div id="composer" style="display:none">
+        <div id="composer-context"></div>
+        <textarea id="composer-input" placeholder="Leave a comment…" rows="3"></textarea>
+        <div id="composer-actions">
+          <button id="composer-cancel">Cancel</button>
+          <button id="composer-add" class="primary">Comment</button>
+        </div>
+      </div>
+      <div id="comments-list"></div>
+    </div>
   </div>
 </div>
 
@@ -622,6 +760,187 @@
     document.getElementById('editor-area').classList.remove('reconcile');
   }
 
+  // --- Comments ---
+  let comments = [];
+  let composerAnchor = null;   // { paragraph_index, anchor_text } for anchored, else null
+  let hoverBlock = null;
+
+  function isSubmittedSession() { return sessionData?.status === 'submitted'; }
+  function proseMirrorRoot() {
+    return document.querySelector('#editor-wrap .toastui-editor-ww-container .ProseMirror');
+  }
+  function relTime(ts) {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+  }
+
+  async function loadComments() {
+    try { comments = await api('GET', '/comments'); }
+    catch { comments = []; }
+    renderComments();
+  }
+
+  // Re-anchor a comment to a current block: prefer its stored index, else find a
+  // block whose text still matches; null = detached (paragraph no longer exists).
+  function findAnchorEl(c) {
+    const root = proseMirrorRoot();
+    if (!root || c.anchor_text == null) return null;
+    const blocks = Array.from(root.children);
+    const byIdx = blocks[c.paragraph_index];
+    if (byIdx && byIdx.textContent === c.anchor_text) return byIdx;
+    return blocks.find(b => b.textContent === c.anchor_text) || null;
+  }
+
+  function highlightParagraph(el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('paragraph-highlight');
+    setTimeout(() => el.classList.remove('paragraph-highlight'), 1500);
+  }
+
+  function renderComments() {
+    const list = document.getElementById('comments-list');
+    if (!list) return;
+    list.innerHTML = '';
+    // This file's comments (anchored first, then file-level), then general notes.
+    const shown = comments.filter(c => c.file_path === currentFile || c.file_path == null);
+    const rank = c => (c.anchor_text != null ? 0 : (c.file_path != null ? 1 : 2));
+    shown.sort((a, b) => rank(a) - rank(b) || a.created_at - b.created_at);
+    if (!shown.length) {
+      const empty = document.createElement('div');
+      empty.id = 'comments-empty';
+      empty.textContent = 'No comments yet.';
+      list.appendChild(empty);
+      return;
+    }
+    const submitted = isSubmittedSession();
+    shown.forEach(c => {
+      const item = document.createElement('div');
+      item.className = 'comment-item' + (c.resolved ? ' resolved' : '');
+      if (c.anchor_text != null) {
+        const anchorEl = findAnchorEl(c);
+        const a = document.createElement('div');
+        a.className = 'comment-anchor' + (anchorEl ? '' : ' detached');
+        a.textContent = anchorEl ? c.anchor_text : (c.anchor_text + '  — no longer in the document');
+        if (anchorEl) a.onclick = () => highlightParagraph(anchorEl);
+        item.appendChild(a);
+      } else if (c.file_path == null) {
+        const g = document.createElement('div');
+        g.className = 'comment-general';
+        g.textContent = 'General';
+        item.appendChild(g);
+      }
+      const body = document.createElement('div');
+      body.className = 'comment-body';
+      body.textContent = c.body;
+      item.appendChild(body);
+      const meta = document.createElement('div');
+      meta.className = 'comment-meta';
+      const time = document.createElement('span');
+      time.textContent = relTime(c.created_at) + (c.resolved ? ' · resolved' : '');
+      meta.appendChild(time);
+      if (!submitted) {
+        const resolveBtn = document.createElement('button');
+        resolveBtn.textContent = c.resolved ? 'Unresolve' : 'Resolve';
+        resolveBtn.onclick = () => toggleResolve(c);
+        meta.appendChild(resolveBtn);
+        const delBtn = document.createElement('button');
+        delBtn.textContent = 'Delete';
+        delBtn.onclick = () => deleteComment(c);
+        meta.appendChild(delBtn);
+      }
+      item.appendChild(meta);
+      list.appendChild(item);
+    });
+  }
+
+  function openComposer(anchor) {
+    if (isSubmittedSession()) return;
+    composerAnchor = anchor;
+    const ctx = document.getElementById('composer-context');
+    if (anchor && anchor.anchor_text != null) ctx.textContent = anchor.anchor_text;
+    else ctx.textContent = currentFile ? ('General comment on ' + currentFile) : 'General comment';
+    document.getElementById('comments-panel').classList.remove('collapsed');
+    document.getElementById('composer').style.display = 'block';
+    const input = document.getElementById('composer-input');
+    input.value = '';
+    input.focus();
+  }
+  function closeComposer() {
+    document.getElementById('composer').style.display = 'none';
+    composerAnchor = null;
+  }
+  async function submitComposer() {
+    const body = document.getElementById('composer-input').value.trim();
+    if (!body) return;
+    const payload = { body };
+    if (composerAnchor && composerAnchor.anchor_text != null) {
+      payload.file_path = currentFile;
+      payload.paragraph_index = composerAnchor.paragraph_index;
+      payload.anchor_text = composerAnchor.anchor_text;
+    } else {
+      payload.file_path = currentFile || null;
+    }
+    try {
+      await api('POST', '/comments', payload);
+      closeComposer();
+      await loadComments();
+      showToast('Comment added');
+    } catch (e) {
+      showToast('Could not add comment: ' + e.message, 3000);
+    }
+  }
+  async function toggleResolve(c) {
+    try { await api('PATCH', `/comments/${c.id}`, { resolved: !c.resolved }); await loadComments(); }
+    catch (e) { showToast('Failed: ' + e.message, 3000); }
+  }
+  async function deleteComment(c) {
+    if (!confirm('Delete this comment?')) return;
+    try { await api('DELETE', `/comments/${c.id}`); await loadComments(); }
+    catch (e) { showToast('Failed: ' + e.message, 3000); }
+  }
+
+  // Floating "comment on this paragraph" button that follows the hovered block.
+  function attachParagraphCommenting() {
+    const btn = document.getElementById('para-comment-btn');
+    btn.style.display = 'none';
+    const root = proseMirrorRoot();
+    if (!root || isSubmittedSession()) return;
+    const area = document.getElementById('editor-area');
+    let hideTimer = null;
+    const cancelHide = () => clearTimeout(hideTimer);
+    const scheduleHide = () => { hideTimer = setTimeout(() => { btn.style.display = 'none'; }, 200); };
+
+    function topBlockFrom(node) {
+      let el = node;
+      while (el && el.parentElement !== root) el = el.parentElement;
+      return (el && el.parentElement === root) ? el : null;
+    }
+    root.addEventListener('mousemove', (e) => {
+      cancelHide();
+      const block = topBlockFrom(e.target);
+      if (!block) return;
+      hoverBlock = block;
+      const br = block.getBoundingClientRect();
+      const ar = area.getBoundingClientRect();
+      btn.style.display = 'inline-flex';
+      btn.style.top = (br.top - ar.top + 2) + 'px';
+      btn.style.left = (br.right - ar.left - 30) + 'px';
+    });
+    root.addEventListener('mouseleave', scheduleHide);
+    btn.onmouseenter = cancelHide;
+    btn.onmouseleave = scheduleHide;
+    btn.onclick = () => {
+      if (!hoverBlock) return;
+      const blocks = Array.from(root.children);
+      const idx = blocks.indexOf(hoverBlock);
+      if (idx < 0) return;
+      openComposer({ paragraph_index: idx, anchor_text: hoverBlock.textContent });
+    };
+  }
+
   // Mount the WYSIWYG editor for the current file, loaded with `content` as the
   // editing baseline. Does not touch the reference pane.
   function mountEditor(content) {
@@ -658,6 +977,8 @@
         saveTimer = setTimeout(saveCurrentFile, 1500);
       });
     }
+    attachParagraphCommenting();
+    renderComments();
   }
 
   async function openFile(filePath) {
@@ -821,6 +1142,7 @@
       approveBtn.disabled = false;
       approveBtn.addEventListener('click', submit);
       document.getElementById('save-btn').addEventListener('click', manualSave);
+      document.getElementById('general-comment-btn').disabled = false;
     }
 
     // Collapse / expand the reference pane.
@@ -829,6 +1151,15 @@
       const collapsed = panel.classList.toggle('collapsed');
       document.getElementById('reference-toggle').textContent = collapsed ? 'Show' : 'Hide';
     });
+
+    // Comments: general-comment button, composer, panel collapse.
+    document.getElementById('general-comment-btn').addEventListener('click', () => openComposer(null));
+    document.getElementById('composer-cancel').addEventListener('click', closeComposer);
+    document.getElementById('composer-add').addEventListener('click', submitComposer);
+    document.getElementById('comments-toggle').addEventListener('click', () => {
+      document.getElementById('comments-panel').classList.toggle('collapsed');
+    });
+    loadComments();
 
     // Auto-open first file
     if (sessionData.files.length > 0) {
