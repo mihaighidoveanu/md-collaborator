@@ -69,7 +69,8 @@ test('submit button flips Approve/Submit changes; a commit shows a persistent ba
   await expect(page.locator('#status-banner')).toContainText('sent to the development team');
   const firstLink = page.locator('#status-banner a');
   const firstHref = await firstLink.getAttribute('href');
-  expect(firstHref).toMatch(/\/pull\/1000$/);
+  // First submit commits directly onto the original PR — no new branch/PR.
+  expect(firstHref).toMatch(/\/pull\/4$/);
 
   // The editor is never locked: the file stays open and editable after a commit.
   await expect(editor).toBeVisible();

@@ -8,8 +8,6 @@
 
 **Total: 44 tests.**
 
-> ⚠️ Two tests encode *intended* behavior that the current implementation does not yet satisfy (marked **[drives fix]**). They are expected to fail until the code is corrected.
-
 ---
 
 ## REQ-1 — Only an authenticated admin can manage sessions
@@ -52,7 +50,7 @@ Reviewers see all of the PR's markdown and nothing else.
 
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
-| R4.1 | happy | I | The listing shows each session's status, how many files were edited, and a link that actually opens that session **[drives fix]** |
+| R4.1 | happy | I | The listing shows each session's status, how many files were edited, and a link that actually opens that session |
 
 ---
 
@@ -71,7 +69,7 @@ Reviewers see all of the PR's markdown and nothing else.
 |---|------|-----|----------|
 | R6.1 | happy | I/E | With a valid link, the reviewer sees the file list and can open each file's current content |
 | R6.2 | happy | I | A reviewer who has edited a file sees their own latest version, not the stale original |
-| R6.3 | unhappy | I | A request for a file outside the session's file set is refused **[drives fix]** |
+| R6.3 | unhappy | I | A request for a file outside the session's file set is refused |
 
 ---
 
@@ -96,13 +94,14 @@ Reviewers see all of the PR's markdown and nothing else.
 ## REQ-9 — Submission approves or commits, and never locks the session
 
 With no pending edits, "Submit" posts a formal GitHub approval on the
-**original** developer PR. With pending edits, it commits them to the
-**current** review branch/PR — creating either as needed (REQ-18) — and the
+**original** developer PR. With pending edits, it commits them directly onto
+the **current PR's** head branch — no new branch, no new PR — creating a
+fallback branch/PR only once that PR is no longer open (REQ-18) — and the
 session stays open for further rounds (no terminal "submitted" status).
 
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
-| R9.1 | happy | I/E | Submitting with edits creates one branch, one commit, and one PR targeting the PR's head branch on a first submit; the session stays active and remains editable afterward |
+| R9.1 | happy | I/E | Submitting with edits commits directly onto the PR's head branch — no new branch, no new PR — on a first submit; the session stays active and remains editable afterward |
 | R9.2 | happy | I | Several edited files are delivered as one commit, not many |
 | R9.3 | edge | I/E | Submitting with no pending edits approves the original PR instead, opening no branch or PR |
 
@@ -122,11 +121,15 @@ The reviewer's commit must touch only the lines they actually changed; untouched
 
 ## REQ-11 — Submission never overwrites newer work on the branch
 
+Branch/PR creation, and the cleanup of a branch that failed to attach to a PR,
+only ever apply to the **fallback** path (REQ-18 B2) — an open current PR is
+always committed onto directly, with no branch to create or clean up.
+
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
-| R11.1 | happy | I/E | If the branch advanced since the session was created, submission still succeeds by branching off the live head SHA — never clobbering newer work |
-| R11.2 | unhappy | I | If the commit to GitHub fails, the session stays open — never left half-submitted |
-| R11.3 | unhappy | I | If opening the PR fails, the session stays open — never left half-submitted |
+| R11.1 | happy | I/E | If the branch advanced since the session was created, submission still succeeds by committing onto the live head SHA — never clobbering newer work |
+| R11.2 | unhappy | I | If the commit to GitHub fails on an open current PR, the session stays open and no branch needs cleanup — never left half-submitted |
+| R11.3 | unhappy | I | If the fallback branch creation fails, the session stays open — never left half-submitted |
 
 ---
 
@@ -196,20 +199,21 @@ their own session.
 
 ---
 
-## REQ-18 — Same-PR re-submission reuses the current review branch/PR
+## REQ-18 — Same-PR re-submission reuses the current PR
 
-Re-submissions land on the **same** review branch/PR rather than spawning a
-new pair every time. Selection follows the merge-state matrix: an open review
-PR reuses both branch and PR (B1); a merged review PR whose branch is still
-alive reuses the branch but opens a new PR (B2); a merged review PR whose
-branch was deleted creates a fresh branch (off the target branch) and a new PR
-(B3).
+Re-submissions land on the **current PR** — the original developer PR until a
+fallback replaces it — rather than spawning a new branch/PR every time.
+Selection follows the merge-state matrix, keyed on the current PR's state:
+an open current PR is committed onto directly, no new branch/PR (B1); a
+merged/closed current PR triggers a fallback — a fresh branch off its own
+**base** branch and a new PR, which becomes current (B2); a later submit
+while that new PR is open reuses it the same way as B1 (B3).
 
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
-| R18.1 | happy | I | (B1) Re-submitting while the review PR is open adds a commit to the same branch and opens no new PR |
-| R18.2 | edge | I | (B2) Re-submitting after the review PR merged, with its branch still alive, reuses the branch but opens a new PR |
-| R18.3 | edge | I | (B3) Re-submitting after the review PR merged and its branch deleted creates a fresh branch off the target branch and a new PR |
+| R18.1 | happy | I | (B1) Re-submitting while the original PR stays open keeps committing straight onto its head branch — no new branch or PR |
+| R18.2 | edge | I | (B2) Re-submitting after the original PR merges opens a fallback branch off its own base branch and a new PR, which becomes current |
+| R18.3 | edge | I | (B3) Once the fallback PR is open, a further re-submit reuses it — no second fallback branch or PR |
 
 ---
 
@@ -228,13 +232,13 @@ opens no PR; the review-PR link, if any, stays usable afterward.
 ## REQ-20 — Baseline advance after a commit-submit
 
 Every file committed in a submit round has its dirty baseline reset, so the
-next round starts clean — and a reused branch is never deleted on failure
-(only a branch created in that same call is).
+next round starts clean — and only a branch created in that same call is ever
+cleaned up on failure (a branch the current PR already had is never touched).
 
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
 | R20.1 | happy | I | After a commit-submit, committed files are no longer dirty and the next no-edit submit approves rather than re-committing |
-| R20.2 | unhappy | I | A commit failure while reusing an existing review branch (B1) never deletes that branch |
+| R20.2 | unhappy | I | A commit failure while the current PR is open never deletes a branch — there is none to clean up (same guarantee as R11.2) |
 
 ---
 
@@ -279,4 +283,4 @@ Every requirement has at least one test; every requirement with a meaningful fai
 | A file edited to change one line; another with repeated identical lines; a very large file | R10.1–R10.3 |
 | Markdown file with a mermaid block | R14.1 |
 | Sessions seeded in active / revoked states | R13 and other state-dependent checks |
-| Review PR fixture (open, or merged with branch alive/deleted) | R18.1–R18.3, R20.2 |
+| Original PR fixture (open; or merged, to drive the fallback) | R18.1–R18.3, R20.2 |
