@@ -32,6 +32,12 @@ function buildPrBody(session, comments) {
     .filter(Boolean).join('\n');
 }
 
+// The original developer PR's URL — the "current PR" until/unless a
+// merge/close fallback opens a new one (functional-spec.md §2.1, §6).
+function originalPrUrl(session) {
+  return `https://github.com/${session.owner}/${session.repo}/pull/${session.pr_number}`;
+}
+
 function createReviewRouter({ db, github }) {
   const router = express.Router();
   const { requireSession, requireNotRevoked } = createSessionMiddleware(db);
@@ -99,6 +105,8 @@ function createReviewRouter({ db, github }) {
         submitted_branch: session.submitted_branch,
         submitted_pr_number: session.submitted_pr_number,
         submitted_pr_url: session.submitted_pr_url,
+        current_pr_number: session.submitted_pr_number ?? session.pr_number,
+        current_pr_url: session.submitted_pr_url ?? originalPrUrl(session),
         approved_at: session.approved_at,
         settled,
         files,
@@ -288,90 +296,92 @@ function createReviewRouter({ db, github }) {
       }
     }
 
-    // ── SUBMIT-CHANGES path: resolve target branch/PR via the matrix (D2) ──
-    let branch = session.submitted_branch;
-    let prNumber = session.submitted_pr_number;
-    let prUrl = session.submitted_pr_url;
-    let needNewBranch = false;
-    let needNewPr = false;
+    // ── SUBMIT-CHANGES path: target the CURRENT PR (the original PR until a
+    // merge/close fallback opens a new one), per the re-submission matrix
+    // (functional-spec.md §2.1). We never maintain a separate review branch
+    // while the current PR stays open — every submit is a plain commit onto
+    // its own branch's live head. A new branch + PR appears only as a
+    // fallback once that PR is found merged or closed.
+    const currentPrNumber = session.submitted_pr_number ?? session.pr_number;
+    const currentBranch = session.submitted_branch ?? session.head_branch;
 
-    if (!branch) {
-      needNewBranch = true; needNewPr = true; // first submit
-    } else {
-      const { merged } = await withRetry(() =>
-        github.getPRState(session.owner, session.repo, prNumber));
-      const alive = await withRetry(() =>
-        github.branchExists(session.owner, session.repo, branch));
-      if (merged) {
-        needNewPr = true;                 // merged → new PR
-        if (!alive) needNewBranch = true; //   + branch gone → new branch (B3)
-        // alive → reuse branch, new PR (B2)
-      } else if (!alive) {
-        needNewBranch = true; needNewPr = true; // edge: open PR but branch deleted
-      }
-      // else: open PR + alive branch → reuse both (B1), needNew* stay false
-    }
+    const { merged, state } = await withRetry(() =>
+      github.getPRState(session.owner, session.repo, currentPrNumber));
+    const isOpen = state === 'open' && !merged;
 
-    // Pick the base SHA to commit on:
-    //   new branch   → off the TARGET branch (session.head_branch) live head
-    //   reuse branch → off the REVIEW branch live head (picks up developer commits, D5)
     let createdBranchThisCall = null;
     try {
-      let baseSha;
-      let targetHeadSha;
-      if (needNewBranch) {
-        baseSha = await withRetry(() =>
-          github.getCurrentHeadSha(session.owner, session.repo, session.head_branch));
-        targetHeadSha = baseSha; // branching off the target's head — same value
-        branch = await github.createBranch(
-          session.owner, session.repo,
-          `review/pr${session.pr_number}-${session.token.slice(0, 8)}`, baseSha);
-        createdBranchThisCall = branch; // only THIS gets cleaned up on failure
+      let committedBranch;
+      let commitBaseSha;
+      let fallbackBase = null;
+
+      if (isOpen) {
+        // Open current PR (including the very first submit, against the
+        // original PR): commit straight onto its own branch's live head.
+        committedBranch = currentBranch;
+        commitBaseSha = await withRetry(() =>
+          github.getCurrentHeadSha(session.owner, session.repo, currentBranch));
       } else {
-        baseSha = await withRetry(() =>
-          github.getCurrentHeadSha(session.owner, session.repo, branch));
-        // Reads compare base_sha against the TARGET branch's head (see GET
-        // /files/*), not the review branch's — fetch it separately here.
-        targetHeadSha = await withRetry(() =>
-          github.getCurrentHeadSha(session.owner, session.repo, session.head_branch));
+        // Merged or closed: fall back to a new branch off the current PR's
+        // own base/target branch, then a new PR onto that base.
+        const pr = await withRetry(() =>
+          github.getPR(session.owner, session.repo, currentPrNumber));
+        fallbackBase = pr.base.ref;
+        commitBaseSha = await withRetry(() =>
+          github.getCurrentHeadSha(session.owner, session.repo, fallbackBase));
+        committedBranch = await github.createBranch(
+          session.owner, session.repo,
+          `review/pr${session.pr_number}-${session.token.slice(0, 8)}`, commitBaseSha);
+        createdBranchThisCall = committedBranch; // only THIS gets cleaned up on failure
       }
 
-      await github.commitChanges(
-        session.owner, session.repo, branch, baseSha,
+      const newCommitSha = await github.commitChanges(
+        session.owner, session.repo, committedBranch, commitBaseSha,
         dirtyFiles.map(f => ({
           filePath: f.file_path,
           content: reconstructMinimalContent(f.original_content, f.content),
         })));
 
-      if (needNewPr) {
+      let prNumber = currentPrNumber;
+      let prUrl = session.submitted_pr_url ?? originalPrUrl(session);
+
+      if (!isOpen) {
         const comments = db.prepare(
           'SELECT file_path, anchor_text, body FROM comments WHERE session_id = ? ORDER BY created_at'
         ).all(session.id);
         const pr = await github.createPullRequest(
-          session.owner, session.repo, branch, session.head_branch,
+          session.owner, session.repo, committedBranch, fallbackBase,
           `Review: ${session.pr_title}`, buildPrBody(session, comments));
         createdBranchThisCall = null; // PR now owns the branch
         prNumber = pr.number; prUrl = pr.html_url;
+
+        // Persist the new current PR/branch (overwrite — they are "current",
+        // not one-shot). Left null while the original PR stays current.
+        db.prepare(`UPDATE sessions
+           SET submitted_branch = ?, submitted_pr_number = ?, submitted_pr_url = ?
+           WHERE id = ?`).run(committedBranch, prNumber, prUrl, session.id);
       }
 
-      // Persist current review branch/PR (overwrite — they are "current", not one-shot).
-      // last_action_sha is pinned to the same target-branch head used for base_sha
-      // below, so the button settles iff nothing has moved upstream since this round.
-      db.prepare(`UPDATE sessions
-         SET submitted_branch = ?, submitted_pr_number = ?, submitted_pr_url = ?, last_action_sha = ?
-         WHERE id = ?`).run(branch, prNumber, prUrl, targetHeadSha, session.id);
+      // Reads always diff against session.head_branch (see GET /files/*), so
+      // the edit baseline must track ITS live head — which is the same as
+      // the commit we just made when we committed onto head_branch itself,
+      // and otherwise needs a separate read.
+      const targetHeadSha = committedBranch === session.head_branch
+        ? newCommitSha
+        : await withRetry(() =>
+            github.getCurrentHeadSha(session.owner, session.repo, session.head_branch));
 
-      // D3 — advance baselines so the next round starts clean. base_sha must
-      // track the TARGET branch's head (what reads compare against), not the
-      // review branch's commit — otherwise every committed file looks
-      // permanently "drifted" against its own unrelated target-branch content.
+      db.prepare('UPDATE sessions SET last_action_sha = ? WHERE id = ?')
+        .run(targetHeadSha, session.id);
+
+      // D3 — advance baselines so the next round starts clean.
       const advance = db.prepare(`UPDATE file_edits
          SET dirty = 0, original_content = content, base_sha = ?
          WHERE session_id = ? AND file_path = ?`);
       for (const f of dirtyFiles) advance.run(targetHeadSha, session.id, f.file_path);
 
       // status stays 'active' (D4) — never set 'submitted'.
-      res.json({ ok: true, action: 'submitted', pr_number: prNumber, pr_url: prUrl, branch });
+      res.json({ ok: true, action: 'submitted', pr_number: prNumber, pr_url: prUrl, branch: committedBranch });
     } catch (err) {
       if (createdBranchThisCall) {
         try { await github.deleteBranch(session.owner, session.repo, createdBranchThisCall); } catch {}

@@ -157,6 +157,9 @@
     }
     tbody.innerHTML = sessions.map(s => {
       const link = `${baseUrl}/review/${s.token || ''}`;
+      // The current PR is the original PR until a fallback replaces it.
+      const prHref = s.submitted_pr_url || `https://github.com/${s.owner}/${s.repo}/pull/${s.pr_number}`;
+      const prNum = s.submitted_pr_number || s.pr_number;
       return `
         <tr>
           <td><strong>#${s.pr_number}</strong><br><small style="color:#6a737d">${s.owner}/${s.repo}</small></td>
@@ -172,9 +175,7 @@
             ${s.status === 'active'
               ? `<button class="danger" onclick="revoke('${s.id}')">Revoke</button>`
               : ''}
-            ${s.submitted_pr_url
-              ? `<a href="${escHtml(s.submitted_pr_url)}" target="_blank" style="color:#0366d6;font-size:12px">Review PR #${escHtml(String(s.submitted_pr_number))}</a>`
-              : ''}
+            <a href="${escHtml(prHref)}" target="_blank" style="color:#0366d6;font-size:12px">PR #${escHtml(String(prNum))}</a>
           </td>
         </tr>
       `;

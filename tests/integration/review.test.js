@@ -16,7 +16,7 @@ async function setup({
   contents = contents || { 'docs/intro.md': '# Intro\nhello\n', 'README.md': '# Readme\n' };
   const github = createFakeGithub({
     prs: {
-      'acme/docs#1': { state: 'open', title: 'Docs', head: { ref: 'feature', sha: 'sha-1' }, files, contents },
+      'acme/docs#1': { state: 'open', title: 'Docs', head: { ref: 'feature', sha: 'sha-1' }, base: { ref: 'main' }, files, contents },
       ...(extraPrs || {}),
     },
     headShas,
@@ -236,7 +236,7 @@ test('R16.3 an edited file whose upstream has not moved stays a plain view (no n
 // REQ-9 — Submission: approve when there are no pending edits, or commit (and
 // open/reuse a PR) when there are.
 
-test('R9.1 submitting with edits opens one branch, one commit, and one PR; the session stays active', async () => {
+test('R9.1 submitting with edits commits directly onto the original PR\'s head branch; the session stays active', async () => {
   active = await setup();
   const { ctx, github, session } = active;
 
@@ -246,28 +246,24 @@ test('R9.1 submitting with edits opens one branch, one commit, and one PR; the s
   const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
   assert.equal(res.status, 200);
   assert.equal(res.json.action, 'submitted');
-  assert.equal(github.calls.createBranch.length, 1, 'one new branch was created');
+  assert.equal(github.calls.createBranch.length, 0, 'no new branch — the original PR is still open');
+  assert.equal(github.calls.createPullRequest.length, 0, 'no new PR — the original PR is still open');
   assert.equal(github.calls.commitChanges.length, 1, 'one commit was written');
-  assert.equal(github.calls.createPullRequest.length, 1, 'one PR was opened');
+  assert.equal(github.calls.commitChanges[0].branch, 'feature', 'commit lands directly on the PR\'s own head branch');
+  assert.equal(github.calls.commitChanges[0].headSha, 'sha-1', 'commit is off the branch\'s live head');
 
-  // The reviewer never writes to the PR's own branch.
-  const newBranch = github.calls.createBranch[0].branchName;
-  assert.notEqual(newBranch, 'feature', 'a fresh branch, not the PR head branch');
-  assert.equal(github.calls.commitChanges[0].branch, newBranch, 'commit lands on the new branch');
-  const pr = github.calls.createPullRequest[0];
-  assert.equal(pr.head, newBranch, 'PR head is the new branch');
-  assert.equal(pr.base, 'feature', 'PR targets the original PR head branch');
-
-  assert.equal(res.json.pr_number, pr.number);
-  assert.equal(res.json.pr_url, pr.html_url);
+  assert.equal(res.json.pr_number, session.pr_number, 'the original PR is reported as the current PR');
+  assert.equal(res.json.pr_url, `https://github.com/acme/docs/pull/${session.pr_number}`);
+  assert.equal(res.json.branch, 'feature');
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
   assert.equal(meta.json.status, 'active', 'the session is never locked by submitting');
 
-  // The opened PR is persisted on the session row (survives reload).
+  // No fallback branch/PR was opened, so submitted_* stay null — the current
+  // PR is still computed as the original PR.
   const row = ctx.db.prepare('SELECT submitted_pr_number, submitted_branch FROM sessions WHERE id = ?').get(session.id);
-  assert.equal(row.submitted_pr_number, pr.number, 'the PR is recorded on the session');
-  assert.equal(row.submitted_branch, newBranch, 'the branch is recorded on the session');
+  assert.equal(row.submitted_pr_number, null, 'no fallback PR was opened');
+  assert.equal(row.submitted_branch, null, 'no fallback branch was opened');
 
   // The business can keep editing after a submit (D4) — no terminal lock.
   const again = await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
@@ -287,6 +283,8 @@ test('R9.2 several edited files are delivered as one commit, not many', async ()
   await ctx.request('POST', `/review/api/${session.token}/submit`);
   assert.equal(github.calls.commitChanges.length, 1, 'exactly one commit');
   assert.equal(github.calls.commitChanges[0].editedFiles.length, 2, 'both files in that one commit');
+  assert.equal(github.calls.createBranch.length, 0, 'no branch needed for an open PR');
+  assert.equal(github.calls.createPullRequest.length, 0, 'no PR needed for an open PR');
 });
 
 test('R9.3 submitting with no pending edits approves the original PR, opening no branch or PR', async () => {
@@ -327,15 +325,17 @@ test('R11.1 if the branch advanced, submission succeeds off the live head SHA', 
 
   const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
   assert.equal(res.status, 200, 'submission is not refused on an advanced branch');
-  // Branch off and commit against the live head, never the stale session SHA.
-  assert.equal(github.calls.createBranch[0].fromSha, 'sha-2-newer', 'new branch starts from the live head');
+  // Commit straight onto the PR's own branch, off the live head, never the
+  // stale session SHA — no branch is created for an open current PR.
+  assert.equal(github.calls.createBranch.length, 0, 'no branch is created for an open current PR');
+  assert.equal(github.calls.commitChanges[0].branch, 'feature');
   assert.equal(github.calls.commitChanges[0].headSha, 'sha-2-newer', 'commit parents the live head');
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
   assert.equal(meta.json.status, 'active', 'the session stays active after submitting');
 });
 
-test('R11.2 if the commit to GitHub fails, the session stays open and the branch is cleaned up', async () => {
+test('R11.2 if the commit to GitHub fails, the session stays open and no branch needs cleanup', async () => {
   active = await setup({ commitShouldFail: true });
   const { ctx, github, session } = active;
 
@@ -345,40 +345,49 @@ test('R11.2 if the commit to GitHub fails, the session stays open and the branch
   const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
   assert.equal(res.status, 500, 'a commit failure surfaces as an error');
 
-  // The branch was created before the commit failed, so it is removed again.
-  assert.equal(github.calls.createBranch.length, 1);
-  assert.equal(github.calls.deleteBranch.length, 1, 'the half-created branch is cleaned up');
-  assert.equal(github.calls.deleteBranch[0].branch, github.calls.createBranch[0].branchName);
+  // No branch was created (the commit targets the open original PR's own
+  // branch directly), so there is nothing to clean up.
+  assert.equal(github.calls.createBranch.length, 0);
+  assert.equal(github.calls.deleteBranch.length, 0, 'no branch was created in this call');
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
   assert.equal(meta.json.status, 'active', 'session is not left half-submitted');
 });
 
-test('R11.4b if opening the PR fails, the branch (with its commit) is cleaned up', async () => {
+// R11.3 / R11.4b now exercise the merge/close FALLBACK exclusively — a new
+// branch + PR is only ever created once the current PR is no longer open.
+
+test('R11.3 if the fallback branch creation fails, the session stays open', async () => {
+  active = await setup({ submitShouldFail: true });
+  const { ctx, github, session } = active;
+  github.mergePr('acme', 'docs', session.pr_number, { deleteBranch: false });
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+
+  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res.status, 500, 'a branch-creation failure surfaces as an error');
+  assert.equal(github.calls.commitChanges.length, 0, 'nothing was committed');
+  assert.equal(github.calls.deleteBranch.length, 0, 'no branch exists yet to clean up');
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.status, 'active', 'session is not left half-submitted');
+});
+
+test('R11.4b if opening the fallback PR fails, the newly created branch (with its commit) is cleaned up', async () => {
   active = await setup({ prShouldFail: true });
   const { ctx, github, session } = active;
+  github.mergePr('acme', 'docs', session.pr_number, { deleteBranch: false });
 
   await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
     { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
 
   const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
   assert.equal(res.status, 500, 'a PR-creation failure surfaces as an error');
+  assert.equal(github.calls.createBranch.length, 1, 'a fallback branch was created');
   assert.equal(github.calls.commitChanges.length, 1, 'the commit happened');
   assert.equal(github.calls.deleteBranch.length, 1, 'the orphaned branch is cleaned up');
-
-  const meta = await ctx.request('GET', `/review/api/${session.token}`);
-  assert.equal(meta.json.status, 'active', 'session is not left half-submitted');
-});
-
-test('R11.3 if opening the PR fails, the session stays open', async () => {
-  active = await setup({ submitShouldFail: true });
-  const { ctx, session } = active;
-
-  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
-    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
-
-  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
-  assert.equal(res.status, 500, 'a PR-creation failure surfaces as an error');
+  assert.equal(github.calls.deleteBranch[0].branch, github.calls.createBranch[0].branchName);
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
   assert.equal(meta.json.status, 'active', 'session is not left half-submitted');
@@ -394,84 +403,97 @@ test('R11.4 a transient blip resolving the live head is retried, and submission 
   const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
   assert.equal(res.status, 200, 'submission recovers after the read blip clears');
   assert.ok(github.calls.getCurrentHeadSha.length >= 3, 'the read was retried past the failures');
-  assert.equal(github.calls.createPullRequest.length, 1, 'the PR is opened once the read succeeds');
+  assert.equal(github.calls.commitChanges.length, 1, 'the commit succeeds once the read recovers');
+  assert.equal(github.calls.createPullRequest.length, 0, 'no PR is opened against an open current PR');
 
   const meta = await ctx.request('GET', `/review/api/${session.token}`);
   assert.equal(meta.json.status, 'active', 'the session stays active after submitting');
 });
 
-// REQ-18 — Re-submission reuses the current review branch/PR per the
-// merge-state matrix (B1/B2/B3) instead of spawning a new pair every time.
+// REQ-18 — Re-submission reuses the CURRENT PR — the original developer PR
+// while it stays open, or its merge/close fallback successor — per the
+// matrix in functional-spec.md §2.1, instead of spawning a new pair every
+// time.
 
-function setupWithReviewPr(overrides = {}) {
-  return setup({
-    extraPrs: {
-      'acme/docs#2000': { state: 'open', merged: false, head: { ref: 'review/pr1-abcd1234', sha: 'review-sha-1' } },
-    },
-    existingBranches: ['review/pr1-abcd1234'],
-    submitted: {
-      submitted_branch: 'review/pr1-abcd1234',
-      submitted_pr_number: 2000,
-      submitted_pr_url: 'https://github.com/acme/docs/pull/2000',
-    },
-    ...overrides,
-  });
-}
-
-test('R18.1 (B1) re-submit while the review PR is open reuses the same branch and PR', async () => {
-  active = await setupWithReviewPr();
+test('R18.1 re-submitting while the original PR stays open keeps committing straight onto its head branch', async () => {
+  active = await setup();
   const { ctx, github, session } = active;
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nfirst round\n', originalContent: '# Intro\nhello\n' } });
+  const first = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(first.status, 200);
 
   await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
     { body: { content: '# Intro\nsecond round\n', originalContent: '# Intro\nhello\n' } });
+  const second = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(second.status, 200);
 
-  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
-  assert.equal(res.status, 200);
-  assert.equal(res.json.action, 'submitted');
-  assert.equal(github.calls.createBranch.length, 0, 'no new branch created');
-  assert.equal(github.calls.createPullRequest.length, 0, 'no new PR opened');
-  assert.equal(github.calls.commitChanges.length, 1, 'exactly one commit');
-  assert.equal(github.calls.commitChanges[0].branch, 'review/pr1-abcd1234', 'commit lands on the existing review branch');
-  assert.equal(github.calls.commitChanges[0].headSha, 'review-sha-1', 'commit is off the review branch\'s live head');
-  assert.equal(res.json.pr_number, 2000, 'the existing PR is reused');
+  assert.equal(github.calls.createBranch.length, 0, 'never a new branch while the original PR is open');
+  assert.equal(github.calls.createPullRequest.length, 0, 'never a new PR while the original PR is open');
+  assert.equal(github.calls.commitChanges.length, 2, 'two separate commits, both onto the PR\'s own branch');
+  assert.equal(github.calls.commitChanges[0].branch, 'feature');
+  assert.equal(github.calls.commitChanges[1].branch, 'feature');
+  assert.equal(first.json.pr_number, session.pr_number, 'the original PR stays current');
+  assert.equal(second.json.pr_number, session.pr_number, 'the original PR stays current');
 });
 
-test('R18.2 (B2) re-submit after the review PR merged, branch still alive: reuses the branch, opens a new PR', async () => {
-  active = await setupWithReviewPr();
+test('R18.2 re-submit after the original PR merges opens a fallback branch off its own base branch and a new PR', async () => {
+  active = await setup({ headShas: { 'acme/docs@main': 'sha-main' } });
   const { ctx, github, session } = active;
-  github.mergePr('acme', 'docs', 2000, { deleteBranch: false });
+  github.mergePr('acme', 'docs', session.pr_number, { deleteBranch: false });
 
   await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
-    { body: { content: '# Intro\nsecond round\n', originalContent: '# Intro\nhello\n' } });
+    { body: { content: '# Intro\nfallback round\n', originalContent: '# Intro\nhello\n' } });
 
   const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
   assert.equal(res.status, 200);
-  assert.equal(github.calls.createBranch.length, 0, 'no new branch — the old one is still alive');
-  assert.equal(github.calls.commitChanges.length, 1);
-  assert.equal(github.calls.commitChanges[0].branch, 'review/pr1-abcd1234', 'commit lands on the reused branch');
-  assert.equal(github.calls.createPullRequest.length, 1, 'a fresh PR is opened since the old one merged');
-  assert.equal(github.calls.createPullRequest[0].head, 'review/pr1-abcd1234');
-  assert.equal(github.calls.createPullRequest[0].base, 'feature');
+  assert.equal(github.calls.createBranch.length, 1, 'a fallback branch is created');
+  assert.equal(github.calls.createBranch[0].fromSha, 'sha-main', 'branched off the original PR\'s own base branch live head');
+  const newBranch = github.calls.createBranch[0].branchName;
+  assert.notEqual(newBranch, 'feature', 'not the (now-merged) PR head branch');
 
-  const row = ctx.db.prepare('SELECT submitted_pr_number FROM sessions WHERE id = ?').get(session.id);
-  assert.notEqual(row.submitted_pr_number, 2000, 'the session now points at the new PR');
+  assert.equal(github.calls.commitChanges.length, 1);
+  assert.equal(github.calls.commitChanges[0].branch, newBranch, 'commit lands on the fallback branch');
+
+  assert.equal(github.calls.createPullRequest.length, 1, 'a new PR is opened since the original merged');
+  assert.equal(github.calls.createPullRequest[0].head, newBranch);
+  assert.equal(github.calls.createPullRequest[0].base, 'main', 'the new PR targets the original PR\'s own base branch');
+
+  const newPrNumber = github.calls.createPullRequest[0].number;
+  assert.equal(res.json.pr_number, newPrNumber);
+
+  const row = ctx.db.prepare('SELECT submitted_pr_number, submitted_branch FROM sessions WHERE id = ?').get(session.id);
+  assert.equal(row.submitted_pr_number, newPrNumber, 'the new PR becomes the current PR');
+  assert.equal(row.submitted_branch, newBranch, 'the new branch is recorded as current');
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.status, 'active');
 });
 
-test('R18.3 (B3) re-submit after the review PR merged and its branch deleted: creates a fresh branch off the target branch', async () => {
-  active = await setupWithReviewPr();
+test('R18.3 once the fallback PR is open, a further re-submit reuses it (no second fallback)', async () => {
+  active = await setup({ headShas: { 'acme/docs@main': 'sha-main' } });
   const { ctx, github, session } = active;
-  github.mergePr('acme', 'docs', 2000, { deleteBranch: true });
+  github.mergePr('acme', 'docs', session.pr_number, { deleteBranch: false });
 
   await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
-    { body: { content: '# Intro\nthird round\n', originalContent: '# Intro\nhello\n' } });
+    { body: { content: '# Intro\nfallback round\n', originalContent: '# Intro\nhello\n' } });
+  await ctx.request('POST', `/review/api/${session.token}/submit`); // opens the fallback branch + PR
 
+  const newBranch = github.calls.createBranch[0].branchName;
+  const newPrNumber = github.calls.createPullRequest[0].number;
+
+  // A further edit while the fallback PR is still open.
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nsecond fallback round\n', originalContent: '# Intro\nhello\n' } });
   const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+
   assert.equal(res.status, 200);
-  assert.equal(github.calls.createBranch.length, 1, 'a fresh branch is created');
-  assert.equal(github.calls.createBranch[0].fromSha, 'sha-1', 'branched off the target branch\'s live head');
-  assert.notEqual(github.calls.createBranch[0].branchName, 'review/pr1-abcd1234', 'not the deleted branch name');
-  assert.equal(github.calls.commitChanges.length, 1);
-  assert.equal(github.calls.createPullRequest.length, 1, 'a fresh PR is opened');
+  assert.equal(github.calls.createBranch.length, 1, 'no second fallback branch is created');
+  assert.equal(github.calls.createPullRequest.length, 1, 'no second fallback PR is opened');
+  assert.equal(github.calls.commitChanges.length, 2, 'a second commit lands on the same fallback branch');
+  assert.equal(github.calls.commitChanges[1].branch, newBranch, 'commit lands on the existing fallback branch');
+  assert.equal(res.json.pr_number, newPrNumber, 'the existing fallback PR is reused');
 });
 
 // REQ-19 — "Approve" posts a GitHub review on the original PR (D1).
@@ -512,47 +534,20 @@ test('R20.1 after a commit-submit, committed files are no longer dirty and the n
   assert.equal(github.calls.commitChanges.length, 1, 'still just the one commit from before');
 });
 
-test('R20.2 a commit failure on a re-submit (B1) leaves the reused branch intact', async () => {
-  active = await setupWithReviewPr({ commitShouldFail: true });
-  const { ctx, github, session } = active;
-
-  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
-    { body: { content: '# Intro\nsecond round\n', originalContent: '# Intro\nhello\n' } });
-
-  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
-  assert.equal(res.status, 500);
-  assert.equal(github.calls.deleteBranch.length, 0, 'a reused branch is never deleted on failure');
-
-  const meta = await ctx.request('GET', `/review/api/${session.token}`);
-  assert.equal(meta.json.status, 'active');
-});
-
 test('after a commit-submit, re-opening the file with no further edits stays plain', async () => {
   const p = filePath('docs/intro.md');
 
-  // The target branch never received the commit (it went to a review
-  // branch), so re-reading must not compare the new baseline against the
-  // target branch's stale, unrelated old content and report a fake conflict.
-  // Checked for both ways a review branch can come into existence: a fresh
-  // one (first submit) and a reused one (B1 resubmit) — the fix computes the
-  // baseline SHA differently in each case.
+  // The baseline must be recomputed from the branch that actually received
+  // the commit, so re-reading must not compare it against stale, unrelated
+  // old content and report a fake conflict.
 
   active = await setup();
   await active.ctx.request('PUT', `/review/api/${active.session.token}/files/${p}`,
     { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
   await active.ctx.request('POST', `/review/api/${active.session.token}/submit`);
-  let res = await active.ctx.request('GET', `/review/api/${active.session.token}/files/${p}`);
+  const res = await active.ctx.request('GET', `/review/api/${active.session.token}/files/${p}`);
   assert.equal(res.json.view, 'plain', 'first submit: the committed baseline does not look drifted against itself');
   assert.equal(res.json.content, '# Intro\nedited\n');
-  await active.ctx.close();
-
-  active = await setupWithReviewPr();
-  await active.ctx.request('PUT', `/review/api/${active.session.token}/files/${p}`,
-    { body: { content: '# Intro\nsecond round\n', originalContent: '# Intro\nhello\n' } });
-  await active.ctx.request('POST', `/review/api/${active.session.token}/submit`);
-  res = await active.ctx.request('GET', `/review/api/${active.session.token}/files/${p}`);
-  assert.equal(res.json.view, 'plain', 'B1 resubmit: the committed baseline does not look drifted against itself');
-  assert.equal(res.json.content, '# Intro\nsecond round\n');
 });
 
 test('after a commit-submit, a later real upstream move is still detected as drift', async () => {

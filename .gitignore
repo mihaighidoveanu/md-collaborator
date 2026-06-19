@@ -16,3 +16,7 @@ npm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Playwright artifacts
+test-results/
+playwright-report/

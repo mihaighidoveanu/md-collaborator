@@ -34,7 +34,7 @@ function createFakeGithub(config = {}) {
     async getPR(owner, repo, number) {
       calls.getPR.push({ owner, repo, number });
       const p = pr(owner, repo, number);
-      return { state: p.state, title: p.title, head: p.head };
+      return { state: p.state, title: p.title, head: p.head, base: p.base };
     },
 
     async getPRFiles(owner, repo, number) {
@@ -76,6 +76,10 @@ function createFakeGithub(config = {}) {
       if (config.commitShouldFail) throw new Error('GitHub commit failed');
       const sha = 'commit-' + (calls.commitChanges.length + 1);
       calls.commitChanges.push({ owner, repo, branch, headSha, editedFiles, sha });
+      // Mirror the real-world invariant: a commit moves the branch head and
+      // changes the committed files' content together.
+      headShas[`${owner}/${repo}@${branch}`] = sha;
+      for (const { filePath, content } of editedFiles) contentOverrides[filePath] = content;
       return sha;
     },
 
@@ -100,6 +104,9 @@ function createFakeGithub(config = {}) {
       const number = 1000 + calls.createPullRequest.length;
       const html_url = `https://github.com/${owner}/${repo}/pull/${number}`;
       calls.createPullRequest.push({ owner, repo, head, base, title, body, number, html_url });
+      // Register it so a later getPR/getPRState against this newly-opened PR
+      // (e.g. a subsequent re-submit landing on it as the current PR) resolves.
+      prs[key(owner, repo, number)] = { state: 'open', merged: false, head: { ref: head }, base: { ref: base } };
       return { number, html_url };
     },
 

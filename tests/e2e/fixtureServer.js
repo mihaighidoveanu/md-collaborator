@@ -46,6 +46,7 @@ function buildFixture() {
       },
       'acme/docs#4': {
         state: 'open', title: 'E2E submit', head: { ref: 'submit-flow', sha: 'sha-4' },
+        base: { ref: 'main' },
         files: [{ filename: 'docs/submit.md', status: 'modified' }],
         contents: { 'docs/submit.md': '# Submit\n\nGoing to be edited.\n' },
       },
