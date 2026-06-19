@@ -21,6 +21,7 @@ function createFakeGithub(config = {}) {
   // headShas lets a test simulate the branch advancing after session creation.
   const headShas = config.headShas || {}; // key `${owner}/${repo}@${branch}` -> sha
   const existingBranches = new Set(config.existingBranches || []); // simulate name collisions
+  const deletedBranches = new Set(); // branches removed (e.g. on merge) — head reads fail
   const contentOverrides = {}; // path -> content; test-only, simulates upstream change
 
   function key(owner, repo, number) { return `${owner}/${repo}#${number}`; }
@@ -28,6 +29,13 @@ function createFakeGithub(config = {}) {
     const p = prs[key(owner, repo, number)];
     if (!p) { const e = new Error('Not Found'); e.status = 404; throw e; }
     return p;
+  }
+  // A branch "exists" if it backs some PR's head or was created in a fallback,
+  // and has not since been deleted — mirroring heads/<branch> on GitHub.
+  function branchLives(owner, repo, branch) {
+    if (deletedBranches.has(`${owner}/${repo}@${branch}`)) return false;
+    if (existingBranches.has(branch)) return true;
+    return Object.values(prs).some(p => p.head && p.head.ref === branch);
   }
 
   return {
@@ -62,6 +70,11 @@ function createFakeGithub(config = {}) {
       // Simulate a transient blip: throw on the first N calls, then recover.
       if (config.headShaFailTimes && calls.getCurrentHeadSha.length <= config.headShaFailTimes) {
         throw new Error('transient: could not resolve ref');
+      }
+      // A deleted branch (e.g. the original PR's head, removed on merge) has no
+      // resolvable head — reads against it fail rather than returning a sha.
+      if (deletedBranches.has(`${owner}/${repo}@${branch}`)) {
+        const e = new Error('Not Found'); e.status = 404; throw e;
       }
       const override = headShas[`${owner}/${repo}@${branch}`];
       if (override !== undefined) return override;
@@ -113,6 +126,7 @@ function createFakeGithub(config = {}) {
     async deleteBranch(owner, repo, branch) {
       calls.deleteBranch.push({ owner, repo, branch });
       existingBranches.delete(branch);
+      deletedBranches.add(`${owner}/${repo}@${branch}`);
     },
 
     async getPRState(owner, repo, number) {
@@ -123,7 +137,12 @@ function createFakeGithub(config = {}) {
 
     async branchExists(owner, repo, branch) {
       calls.branchExists.push({ owner, repo, branch });
-      return existingBranches.has(branch);
+      // Simulate a transient blip (network/5xx) on the first N checks, then
+      // recover — distinct from a definitive "branch is gone" (false).
+      if (config.branchExistsFailTimes && calls.branchExists.length <= config.branchExistsFailTimes) {
+        throw new Error('transient: could not check ref');
+      }
+      return branchLives(owner, repo, branch);
     },
 
     async approvePullRequest(owner, repo, number, body) {
@@ -146,6 +165,14 @@ function createFakeGithub(config = {}) {
       }
     },
 
+    // Test-only: simulate a branch being deleted out from under the session
+    // while its PR is still reported open (a race, or eventual consistency).
+    // After this, heads/<branch> reads 404 and branchExists is false.
+    removeBranch(owner, repo, branch) {
+      existingBranches.delete(branch);
+      deletedBranches.add(`${owner}/${repo}@${branch}`);
+    },
+
     // Test-only: simulate the review PR getting merged on GitHub, optionally
     // along with its branch being deleted (GitHub's "delete branch" button).
     mergePr(owner, repo, number, { deleteBranch: shouldDeleteBranch = false } = {}) {
@@ -154,6 +181,7 @@ function createFakeGithub(config = {}) {
       p.merged = true;
       if (shouldDeleteBranch && p.head) {
         existingBranches.delete(p.head.ref);
+        deletedBranches.add(`${owner}/${repo}@${p.head.ref}`);
       }
     },
   };

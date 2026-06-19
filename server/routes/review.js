@@ -38,6 +38,15 @@ function originalPrUrl(session) {
   return `https://github.com/${session.owner}/${session.repo}/pull/${session.pr_number}`;
 }
 
+// The branch the reviewer's edits currently live on. It starts as the original
+// PR's head branch and moves to the fallback branch once a merge/close opens a
+// new PR (functional-spec.md §2.1). Reads and the "settled" check track this
+// branch rather than head_branch, which may have been deleted when the original
+// PR merged.
+function currentBranchOf(session) {
+  return session.submitted_branch ?? session.head_branch;
+}
+
 function createReviewRouter({ db, github }) {
   const router = express.Router();
   const { requireSession, requireNotRevoked } = createSessionMiddleware(db);
@@ -92,7 +101,7 @@ function createReviewRouter({ db, github }) {
       // rather than getting stuck disabled.
       let settled = false;
       try {
-        const liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, session.head_branch);
+        const liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, currentBranchOf(session));
         settled = !!session.last_action_sha && liveHeadSha === session.last_action_sha;
       } catch {}
 
@@ -146,7 +155,7 @@ function createReviewRouter({ db, github }) {
     // falls back to the session's original head rather than blocking the reviewer.
     let liveHeadSha;
     try {
-      liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, session.head_branch);
+      liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, currentBranchOf(session));
     } catch {
       liveHeadSha = session.head_sha;
     }
@@ -286,7 +295,7 @@ function createReviewRouter({ db, github }) {
         let settledSha = null;
         try {
           settledSha = await withRetry(() =>
-            github.getCurrentHeadSha(session.owner, session.repo, session.head_branch));
+            github.getCurrentHeadSha(session.owner, session.repo, currentBranchOf(session)));
         } catch {}
         db.prepare('UPDATE sessions SET approved_at = ?, last_action_sha = ? WHERE id = ?')
           .run(Date.now(), settledSha, session.id);
@@ -307,7 +316,20 @@ function createReviewRouter({ db, github }) {
 
     const { merged, state } = await withRetry(() =>
       github.getPRState(session.owner, session.repo, currentPrNumber));
-    const isOpen = state === 'open' && !merged;
+    let isOpen = state === 'open' && !merged;
+
+    // An "open" PR can still have lost its head branch — deleted in the
+    // meantime, or eventual consistency right after a merge (GitHub closes a PR
+    // when its head branch is deleted, but that can lag). We can't commit onto a
+    // branch that no longer exists, so confirm it's there; if it's gone, take
+    // the same new-branch/new-PR fallback as a merged/closed PR. branchExists
+    // returns false on a definitive 404 and only throws on a transient error
+    // (which withRetry retries, then surfaces as a 500 leaving the session
+    // active), so we never mistake a blip for a deleted branch.
+    if (isOpen && !(await withRetry(() =>
+        github.branchExists(session.owner, session.repo, currentBranch)))) {
+      isOpen = false;
+    }
 
     let createdBranchThisCall = null;
     try {
@@ -362,14 +384,12 @@ function createReviewRouter({ db, github }) {
            WHERE id = ?`).run(committedBranch, prNumber, prUrl, session.id);
       }
 
-      // Reads always diff against session.head_branch (see GET /files/*), so
-      // the edit baseline must track ITS live head — which is the same as
-      // the commit we just made when we committed onto head_branch itself,
-      // and otherwise needs a separate read.
-      const targetHeadSha = committedBranch === session.head_branch
-        ? newCommitSha
-        : await withRetry(() =>
-            github.getCurrentHeadSha(session.owner, session.repo, session.head_branch));
+      // The commit always lands on the current branch — the open current PR's
+      // own branch, or the fallback branch we just opened and made current
+      // above. Reads track that same branch (currentBranchOf), so the new
+      // baseline is exactly this commit. No extra read of head_branch, which
+      // may have been deleted when the original PR merged.
+      const targetHeadSha = newCommitSha;
 
       db.prepare('UPDATE sessions SET last_action_sha = ? WHERE id = ?')
         .run(targetHeadSha, session.id);

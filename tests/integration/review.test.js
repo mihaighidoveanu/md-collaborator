@@ -496,6 +496,87 @@ test('R18.3 once the fallback PR is open, a further re-submit reuses it (no seco
   assert.equal(res.json.pr_number, newPrNumber, 'the existing fallback PR is reused');
 });
 
+test('R18.4 the fallback succeeds and tracks the new branch even after the original head branch is deleted on merge', async () => {
+  active = await setup({ headShas: { 'acme/docs@main': 'sha-main' } });
+  const { ctx, github, session } = active;
+  // The original PR merges AND GitHub deletes its head branch ("feature" is gone).
+  github.mergePr('acme', 'docs', session.pr_number, { deleteBranch: true });
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nfallback round\n', originalContent: '# Intro\nhello\n' } });
+
+  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res.status, 200, 'the fallback does not blow up reading the now-deleted head branch');
+
+  const newBranch = github.calls.createBranch[0].branchName;
+  const newCommitSha = github.calls.commitChanges[0].sha;
+  assert.equal(github.calls.createBranch[0].fromSha, 'sha-main', 'branched off the base it merged into');
+
+  // The baseline advances to the fallback commit (on the new branch), not to a
+  // stale read of the deleted head branch.
+  const row = ctx.db.prepare('SELECT base_sha, dirty FROM file_edits WHERE session_id = ? AND file_path = ?')
+    .get(session.id, 'docs/intro.md');
+  assert.equal(row.dirty, 0, 'the committed file is clean again');
+  assert.equal(row.base_sha, newCommitSha, 'baseline tracks the new branch, not the deleted head branch');
+
+  // Reopening reads the new current branch and shows the committed edit as plain.
+  const view = await ctx.request('GET', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`);
+  assert.equal(view.json.view, 'plain', 'no phantom drift against the gone branch');
+  assert.equal(view.json.content, '# Intro\nfallback round\n');
+
+  // "settled" reads the new branch too, so a meta fetch does not error out.
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.status, 'active');
+  assert.equal(meta.json.settled, true, 'settled pins to the new branch head, which has not moved');
+});
+
+test('R18.5 if the current branch is deleted while the PR still reads open, submit falls back to a new branch + PR', async () => {
+  active = await setup({ headShas: { 'acme/docs@main': 'sha-main' } });
+  const { ctx, github, session } = active;
+  // The PR is still "open" (not merged/closed) but its head branch vanished —
+  // deleted in the meantime, or eventual consistency right after a merge.
+  github.removeBranch('acme', 'docs', 'feature');
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+
+  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res.status, 200, 'a gone branch falls back instead of erroring');
+
+  // No commit was attempted onto the dead branch; a fresh branch off the base
+  // was created and a new PR opened.
+  assert.equal(github.calls.createBranch.length, 1, 'a fallback branch is created');
+  assert.equal(github.calls.createBranch[0].fromSha, 'sha-main', 'branched off the PR base, not the dead branch');
+  const newBranch = github.calls.createBranch[0].branchName;
+  assert.equal(github.calls.commitChanges.length, 1, 'exactly one commit, onto the new branch');
+  assert.equal(github.calls.commitChanges[0].branch, newBranch);
+  assert.notEqual(newBranch, 'feature');
+  assert.equal(github.calls.createPullRequest.length, 1, 'a new PR is opened');
+  assert.equal(github.calls.createPullRequest[0].base, 'main');
+
+  const row = ctx.db.prepare('SELECT submitted_branch, submitted_pr_number FROM sessions WHERE id = ?').get(session.id);
+  assert.equal(row.submitted_branch, newBranch, 'the new branch becomes current');
+  assert.equal(row.submitted_pr_number, github.calls.createPullRequest[0].number);
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.status, 'active', 'session is never left half-submitted');
+});
+
+test('R18.6 a transient blip checking the current branch is retried, not mistaken for a deleted branch', async () => {
+  // The branch-existence probe blips once; withRetry must recover and treat the
+  // branch as present, committing onto the open PR rather than forcing a fallback.
+  active = await setup({ branchExistsFailTimes: 1 });
+  const { ctx, github, session } = active;
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+
+  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+  assert.equal(res.status, 200, 'a transient read blip recovers rather than forcing a fallback');
+  assert.equal(github.calls.createBranch.length, 0, 'no spurious fallback branch from a blip');
+  assert.equal(github.calls.commitChanges[0].branch, 'feature', 'still commits onto the open PR branch');
+});
+
 // REQ-19 — "Approve" posts a GitHub review on the original PR (D1).
 
 test('R19.1 a failed approval leaves the session unchanged', async () => {
