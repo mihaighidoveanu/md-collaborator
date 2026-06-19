@@ -1,15 +1,10 @@
 # Reference Functional Spec: Reviewer Workflow
 
 **Status:** Reference specification of the desired end-state functionality.
+
 **Audience:** Engineers / AI agents working on the reviewer workflow, and anyone
 who needs the single authoritative description of *what the system does*.
-**How this was produced:** This is the overlay of two design specs —
-`nagendra-review-workflow.md` (the base reviewer workflow) with
-`business-same-pr-resubmission.md` (the later re-submission / Approve model)
-layered on top. Where the two conflict, the later spec wins (see
-[§9 Conflict resolution log](#9-conflict-resolution-log)); everything else is
-united here. This document describes desired functionality only — not the
-phased implementation history.
+
 
 **Glossary:**
 - **Business / Reviewer** ("Nagendra") — the person reviewing a PR's markdown
@@ -19,7 +14,11 @@ phased implementation history.
 - **Original PR** — the developer's PR the session was opened from
   (`sessions.pr_number` / `sessions.head_branch`).
 - **Target branch** — the original PR's head branch (`sessions.head_branch`).
-- **Review branch / Review PR** — the branch + PR the business's edits land on.
+- **Current PR / current branch** — the PR + branch the business's edits land on
+  *right now*. It starts out as the **original PR** / `head_branch` itself — there
+  is no separate review branch while the original PR is open. It only changes if
+  the current PR is merged or closed: a new branch (off that PR's own base/target
+  branch) and a new PR are opened, and that pair becomes the new "current" PR.
 
 ---
 
@@ -28,20 +27,25 @@ phased implementation history.
 The reviewer opens a review link for a PR and works on its markdown. The system
 guarantees the following behavior:
 
-1. **Non-blocking review.** The reviewer's work never overwrites the developer's
-   branch directly. Edits land on a separate review branch via a review PR.
+1. **Direct commits to the original PR.** While the original PR is open, the
+   reviewer's edits commit straight onto its own branch (`head_branch`) — there
+   is no separate review branch or review PR in the common case. Only if that PR
+   gets merged or closed does the tool fall back to opening a new branch + PR
+   (see §2.1).
 2. **Change awareness.** When the reviewer reopens a file, they see what changed
    since the last time they looked at it.
 3. **Comments.** The reviewer can leave explanatory comments, either anchored to
    a specific paragraph or as a free / general note.
-4. **Edits become a review PR.** Submitting edits commits to a review branch and
-   opens (or reuses) a review PR that targets the developer's head branch.
+4. **Edits commit to the current PR.** Submitting edits commits directly to the
+   branch of whichever PR is currently "current" (the original PR, or its
+   merged-PR fallback successor — see §2.1).
 5. **Three-way reconciliation.** When upstream moved while the reviewer had
    unsent edits, they see a three-way view: the base they started from, the new
    upstream content, and their own unsent edits.
 6. **Iterative, non-terminal review.** The session is never locked. The reviewer
-   can keep editing and re-submitting; re-submissions land on the *same* review
-   PR. A no-edit submission posts a formal GitHub **approval** on the original PR.
+   can keep editing and re-submitting; re-submissions land on the *same* current
+   PR. A no-edit submission posts a formal GitHub **approval** on the current PR
+   instead.
 
 The session ends only by being **revoked**. There is no terminal "submitted"
 state.
@@ -54,36 +58,41 @@ The single submit control is **mode-aware**, decided by whether the reviewer has
 pending (uncommitted/dirty) edits:
 
 - **No pending edits → "Approve".** Clicking posts a formal **approving review on
-  the original developer PR** (GitHub `event: 'APPROVE'`), unblocking GitHub's
-  merge button. It writes no branch, no commit, and opens no review PR. Records
-  `approved_at` on the session. The session stays active and editable.
-- **Pending edits → "Submit changes".** Clicking commits the reviewer's edits to
-  a review branch and opens or reuses a review PR per the matrix below.
+  the current PR** (GitHub `event: 'APPROVE'`), unblocking GitHub's merge button.
+  It writes no branch, no commit, and opens no PR. Records `approved_at` on the
+  session. The session stays active and editable.
+- **Pending edits → "Submit changes".** Clicking commits the reviewer's edits
+  directly onto the branch of the **current PR** per the matrix below.
 
 ### 2.1 Re-submission matrix
 
-"Submit changes" picks its branch / PR per the prior review PR's state. We always
-commit off the **live head** of whichever branch we target — we never merge or
-rebase; divergent developer work surfaces as a normal GitHub merge conflict that
-the **developer** resolves.
+"Submit changes" always targets the **current PR** — initially the **original**
+developer PR (`sessions.pr_number` / `head_branch`), so the very first submit
+already commits straight onto `head_branch`. There is no separate review branch
+or review PR while that PR stays open. The current PR only changes if it gets
+merged or closed, in which case a new branch + PR is opened and *that* becomes
+the new current PR for all subsequent submits. We always commit off the **live
+head** of whichever branch we target — we never merge or rebase; divergent
+developer work surfaces as a normal GitHub merge conflict that the **developer**
+resolves.
 
-| Prior review PR state | Review branch | "Submit changes" does | What the reviewer sees on reopen |
-|---|---|---|---|
-| **None (first submit)** | — | create branch off **target branch** → commit → open new PR | their edits |
-| **Open** + commits exist | still active | commit to the **same** branch (same PR) | **diffs** (two-/three-way view) |
-| **Open** + no commits yet | still active | commit to the **same** branch (same PR) | their **last edit** |
-| **Merged** + branch still alive | active | commit to existing branch → open **new** PR | target branch content |
-| **Merged** + branch deleted | deleted | create branch off **target branch** → commit → open **new** PR | the **target branch** content |
-| **Open** + branch deleted (edge) | deleted | create new branch off target → commit → open new PR | their edits |
+| Current PR state | "Submit changes" does | What the reviewer sees on reopen |
+|---|---|---|
+| **Open** (original PR, first submit) | commit directly onto `head_branch` (live head) — no new branch, no new PR | their edits |
+| **Open** (current PR, later submits) | commit directly onto its branch (live head) — no new branch, no new PR | **diffs** (two-/three-way view) |
+| **Merged or closed** | create a new branch off the **live head of that PR's own base/target branch** → commit → open a **new** PR targeting that base branch; this new PR becomes the current PR | the target branch content |
 
 Rules:
-- A new **branch** is created only on (a) the first submit, or (b) the prior
-  review PR was **merged AND** its branch was **deleted** (or the edge case where
-  an open PR's branch was deleted).
-- A new **PR** is created on first submit and whenever the prior review PR is
-  **merged** (the branch may still be alive — reuse it).
-- When the prior review PR is **open** with an alive branch, reuse **both** branch
-  and PR — just add a commit.
+- A new **branch + PR** is created **only** when the current PR is no longer
+  open (merged or closed). Otherwise, every submit is a plain commit onto the
+  current PR's existing branch.
+- The new branch's base is the *current PR's own base branch* (e.g. the branch
+  it targeted, such as `main`) — not necessarily `sessions.head_branch`, since
+  that branch may itself be gone after a merge.
+- After this fallback runs once, `submitted_pr_number` / `submitted_pr_url` /
+  `submitted_branch` are updated to the new PR/branch, and all further submits
+  follow the **Open** row against *that* PR — until/unless it, too, gets merged
+  or closed.
 
 ### 2.2 Baselines advance after a commit-submit
 
@@ -148,9 +157,11 @@ arrays — no client-side diff computation, no npm diff library.
   general comments. Each row shows body, relative time, a resolve toggle, and a
   delete action. Clicking an anchored comment scrolls to / highlights its
   paragraph.
-- **Persistence & travel.** Comments are stored locally and **summarized into the
-  review PR body** so they travel with the PR. Posting them as GitHub *inline
-  review comments* is out of scope.
+- **Persistence & travel.** Comments are stored locally and travel with the
+  **current PR**. When a new PR is opened (the merged/closed fallback in §2.1),
+  the existing comments are **summarized into its body**; a plain commit onto an
+  already-open current PR does not touch that PR's body. Posting comments as
+  GitHub *inline review comments* is out of scope.
 
 API: `GET /comments` (visible to active and previously-submitted sessions),
 `POST /comments` (`body` required, non-empty), `PATCH /comments/:id { resolved }`,
@@ -198,15 +209,17 @@ the dirty rows.
 
 The reference pane is collapsible (Hide/Show).
 
-### 5.3 No terminal lock; review-PR banner
+### 5.3 No terminal lock; current-PR banner
 
 The session is **never read-only**. After a submit, the editor stays editable.
 
-- After a **submitted** response: show a **persistent banner** linking the review
-  PR, then refresh the button (baselines advanced ⇒ reverts to "Approve"). The
-  banner uses **no GitHub jargon** ("PR", "branch", "commit", "GitHub") — the
-  business reviewer doesn't know those terms. Example: *"Your edits have been sent
-  to the development team for implementation. [View details]"*.
+- After a **submitted** response: show a **persistent banner** linking the
+  current PR (the original developer PR, until/unless a merge/close fallback
+  opens a new one), then refresh the button (baselines advanced ⇒ reverts to
+  "Approve"). The banner uses **no GitHub jargon** ("PR", "branch", "commit",
+  "GitHub") — the business reviewer doesn't know those terms. Example: *"Your
+  edits have been sent to the development team for implementation. [View
+  details]"*.
 - After an **approved** response: toast *"Approval sent to the developers"*, set
   `approved_at` locally, refresh button → "Approved ✓".
 - The confirm modal names no GitHub jargon and states the outcome plainly:
@@ -216,17 +229,17 @@ The session is **never read-only**. After a submit, the editor stays editable.
     developers with no changes."*
   - The unopened-files warning modal stays for both cases.
 
-The UI surfaces the review branch / PR URL once it exists. *(req 2 of the
-re-submission spec)*
+The UI surfaces the current PR's URL once a session has one (the original PR
+from the start of the session). *(req 2 of the re-submission spec)*
 
 ---
 
 ## 6. Admin surface
 
-- `GET /sessions` returns each session's **current** review PR
-  (`submitted_pr_number` / `submitted_pr_url`) and `approved_at`. The review PR
-  may change across re-submissions.
-- `admin.html` shows the current review-PR link and an **"Approved"** badge when
+- `GET /sessions` returns each session's **current** PR
+  (`submitted_pr_number` / `submitted_pr_url`) and `approved_at`. This is the
+  original PR until/unless a merge/close fallback opens a new one.
+- `admin.html` shows the current PR link and an **"Approved"** badge when
   `approved_at` is set.
 - Sessions are displayed as **`active`** or **`revoked`** only — there is no
   "submitted/locked" status.
@@ -239,8 +252,8 @@ re-submission spec)*
 `server/db.js` — SQLite, additive `ALTER TABLE … ADD COLUMN` migrations wrapped in
 `try{}catch{}`.
 
-**`sessions`** (review-PR / branch are "current", overwritten across
-re-submissions):
+**`sessions`** (PR / branch are "current" — initialized to the original PR /
+`head_branch`, overwritten only when a merge/close fallback opens a new PR):
 - `submitted_pr_number INTEGER`, `submitted_pr_url TEXT`, `submitted_branch TEXT`
 - `approved_at INTEGER` — timestamp of the last GitHub approval
 
@@ -279,15 +292,17 @@ CREATE TABLE IF NOT EXISTS comments (
 
 - `getPR`, `getPRFiles`, `getFileContent`, `commitChanges`, `getCurrentHeadSha`
 - `createBranch(owner, repo, newBranch, fromSha)` — creates `heads/<newBranch>`;
-  auto-suffixes on name collision; returns the actual name created.
+  auto-suffixes on name collision; returns the actual name created. Used **only**
+  in the merge/close fallback (§2.1) — never on a normal submit against an open
+  current PR.
 - `createPullRequest(owner, repo, head, base, title, body)` → `{ number, html_url }`.
+  Used only in the same fallback.
 - `deleteBranch(owner, repo, branch)` — used to clean up a branch created in a
-  failed submit call.
-- `getPRState(owner, repo, prNumber)` → `{ state, merged }` — drives the
-  re-submission matrix.
-- `branchExists(owner, repo, branch)` → bool (404 → false).
+  failed fallback submit call.
+- `getPRState(owner, repo, prNumber)` → `{ state, merged }` — checked on every
+  submit to decide whether the current PR is still open or needs the fallback.
 - `approvePullRequest(owner, repo, prNumber, body)` → posts `event: 'APPROVE'`
-  review on the **original** PR; returns `{ id, html_url }`.
+  review on the **current** PR; returns `{ id, html_url }`.
 
 Supporting server libs:
 - `server/lib/diff.js` — `lineDiff(oldText, newText)` and
@@ -311,27 +326,26 @@ Where the two source specs disagreed, the later
 | **Submit button** | A single static "Submit for PR" button. | **Mode-aware** "Approve" ⇄ "Submit changes" by pending-edit state. |
 | **Conflict handling on submit** | Don't 409; branch off the live head so we never clobber. | Same intent, generalized: always commit off the live head of the targeted branch; conflicts are the **developer's** problem (no merge/rebase). |
 | **Baselines** | Base captured first-write-wins; not advanced. | Baselines **advance** after a successful commit-submit so the next round starts clean. |
+| **Submit destination** | `business-same-pr-resubmission.md` describes a dedicated review branch + review PR, separate from the original PR, created on first submit and reused/recreated per its own matrix. | **Overridden by direct instruction**: there is no separate review branch/PR while the original PR is open. Submits commit straight onto the original PR's own branch (`head_branch`). A new branch + PR is opened **only** as a fallback once the current PR is merged or closed (§2.1). `business-same-pr-resubmission.md` is left as-is (historical) and is now superseded on this point by this document. |
 
-United without conflict from both specs: non-blocking review, change-aware file
-view (two-way), three-way reconciliation, comments (anchored + general, panel,
-re-anchoring, summarized into PR body), server-side line diffing, the comments
-table / `file_edits.base_sha` / `file_visits` seen-snapshot data model, and the
-GitHub adapter surface.
+United without conflict from both specs: change-aware file view (two-way),
+three-way reconciliation, comments (anchored + general, panel, re-anchoring,
+travel with the current PR), server-side line diffing, the comments table /
+`file_edits.base_sha` / `file_visits` seen-snapshot data model, and the GitHub
+adapter surface.
 
 ---
 
 ## 10. Acceptance checklist (definition of done)
 
-- [ ] The reviewer never writes to the developer's own branch; submitting edits
-      lands them on a review branch via a review PR targeting `head_branch`.
-      *(req 1, 4)*
-- [ ] First edit-submit creates `review/pr<N>-<token>` off `head_branch`, commits
-      once, opens one PR; the session stays editable.
-- [ ] Re-submit with the review PR **open** adds a commit to the **same** branch
-      and opens **no** new PR. *(B1)*
-- [ ] Re-submit after the review PR **merged** opens a new PR — reusing the branch
-      if alive, creating a fresh one off `head_branch` if deleted. *(B2/B3)*
-- [ ] "Approve" (no pending edits) posts an APPROVE review on the **original** PR
+- [ ] First edit-submit commits **directly onto `head_branch`** of the original
+      PR — no new branch, no new PR; the session stays editable. *(req 1, 4)*
+- [ ] Re-submit while the current PR is still **open** adds a commit straight
+      onto its existing branch — no new branch, no new PR.
+- [ ] Re-submit after the current PR is **merged or closed** opens a fresh branch
+      off that PR's own base/target branch and a new PR, which becomes the
+      current PR for subsequent submits.
+- [ ] "Approve" (no pending edits) posts an APPROVE review on the **current** PR
       and creates no branch/commit/PR; the link stays usable.
 - [ ] The button reads "Approve" with no pending edits and "Submit changes" once
       the reviewer edits.
@@ -346,9 +360,9 @@ GitHub adapter surface.
       top-right button creates a general comment; both list, resolve, delete.
       *(req 3)*
 - [ ] A GitHub failure during submit leaves the session editable and removes only
-      a branch created in that same call.
-- [ ] The UI surfaces the review branch / PR URL once it exists, in plain
-      non-GitHub language.
+      a branch created in that same call (the merge/close fallback only).
+- [ ] The UI surfaces the current PR's URL once it exists, in plain non-GitHub
+      language.
 - [ ] `npm test` and `npm run test:e2e` pass; `test-spec.md` reflects the current
       semantics (REQ-9 matrix, REQ-12 removed, REQ-15/16/17 change-aware /
       three-way / comments, REQ-18/19/20 re-submission / approve / baseline
@@ -358,11 +372,12 @@ GitHub adapter surface.
 
 ## 11. Explicitly out of scope
 
-- Merge-conflict resolution between developer pushes and the review branch — the
-  developer handles these on GitHub.
+- Merge-conflict resolution between developer pushes and the reviewer's commits
+  on the current PR's branch — the developer handles these on GitHub.
 - Posting reviewer comments as GitHub **inline review comments** (paragraph →
-  diff-line mapping). Comments are summarized into the review PR body.
-- Auto-merging or closing the review PR from the tool.
+  diff-line mapping). Comments are summarized into the new PR's body only when
+  the merge/close fallback opens one.
+- Auto-merging or closing the current PR from the tool.
 - Multiple distinct reviewer identities within one session.
 - Real-time collaboration / live cursors.
 - Auth changes to the admin surface.
