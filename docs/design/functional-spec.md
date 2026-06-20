@@ -120,7 +120,8 @@ back to `session.head_sha` if that lookup fails) and decides a `view`:
   Loads the content straight into the editor; no reference pane.
 - **`two_way`** — the file changed upstream since the reviewer last looked at it.
   Payload includes the prior seen content, the upstream content, and a
-  `lineDiff(seen, upstream)`. *(req 2)*
+  `lineDiff(seen, upstream)` (the browser uses the diff's added lines to find
+  and highlight the changed paragraphs in the editor — see §5.2). *(req 2)*
 - **`three_way`** — the reviewer has a dirty local edit **and** upstream differs
   from the edit's base (`original_content`). Payload includes `{ base, upstream,
   mine }` and a `threeWay(base, upstream, mine)` alignment with conflict rows
@@ -191,10 +192,16 @@ the dirty rows.
 ### 5.2 Diff / reconciliation panes
 
 - `plain` → editor only.
-- `two_way` → a collapsible reference pane **above** the editor showing
-  `lineDiff(seen, upstream)` (GitHub-style: added lines green `#dcffe4/#22863a`,
-  removed red `#ffeef0/#cb2431`), informational "here's what moved since you last
-  looked." Editor mounts on `upstream`.
+- `two_way` → no edits of the reviewer's own are pending, so this is purely
+  informational: a one-line banner states how many paragraphs the developer
+  changed, and those paragraphs are highlighted **in place** in the editor — a
+  translucent green overlay positioned over each paragraph whose text matches
+  an added line in `lineDiff(seen, upstream)`, rather than a separate
+  diff-row list. (The overlay is drawn outside the editor's own managed DOM
+  and repositioned on scroll/resize, since the editor's internal reconciler
+  reverts classes added directly to its nodes.) A collapsible reference pane
+  **beside** the editor shows the reviewer's last-seen version as plain text,
+  for comparison. Editor mounts on `upstream`.
 - `three_way` → reference pane **beside** the editor (reference left, editor
   right) for compare-while-editing. The reference is a **2-column** view
   **Original | Your edits** with a role-based left-gutter marker on each changed
@@ -223,14 +230,16 @@ The session is **never read-only**. After a submit, the editor stays editable.
 - After an **approved** response: toast *"Approval sent to the developers"*, set
   `approved_at` locally, refresh button → "Approved ✓".
 - The confirm modal names no GitHub jargon and states the outcome plainly:
-  - edits case (title "Submit these changes?"): *"Your edits will be sent to the
+  - edits case (title "Submit your changes?"): *"Your edits will be sent to the
     development team for implementation."*
   - approve case (title "Approve this review?"): *"This sends your approval to the
     developers with no changes."*
   - The unopened-files warning modal stays for both cases.
 
-The UI surfaces the current PR's URL once a session has one (the original PR
-from the start of the session). *(req 2 of the re-submission spec)*
+The current-PR banner (and its link) only appears once the session has
+produced a **submitted** response — there is no banner, and no PR link in the
+header, before the reviewer's first submit, even though the original PR
+exists from session creation. *(req 2 of the re-submission spec)*
 
 ---
 
@@ -361,8 +370,9 @@ adapter surface.
       *(req 3)*
 - [ ] A GitHub failure during submit leaves the session editable and removes only
       a branch created in that same call (the merge/close fallback only).
-- [ ] The UI surfaces the current PR's URL once it exists, in plain non-GitHub
-      language.
+- [ ] The UI surfaces the current PR's URL via the persistent banner once a
+      submit has produced one — not before the reviewer's first submit — in
+      plain non-GitHub language.
 - [ ] `npm test` and `npm run test:e2e` pass; `test-spec.md` reflects the current
       semantics (REQ-9 matrix, REQ-12 removed, REQ-15/16/17 change-aware /
       three-way / comments, REQ-18/19/20 re-submission / approve / baseline

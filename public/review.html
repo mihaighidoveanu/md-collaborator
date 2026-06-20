@@ -94,7 +94,7 @@
       color: #6a737d;
       font-size: 15px;
     }
-    #editor-wrap { flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+    #editor-wrap { position: relative; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
     #editor-wrap .toastui-editor-defaultUI { height: 100%; }
 
     /* Reference pane: shows what moved upstream so the reviewer can re-apply
@@ -188,15 +188,35 @@
     }
     #reference-panel.collapsed #reference-body { display: none; }
 
-    /* Two-way unified diff rows */
-    .diff-row { display: flex; padding: 0 16px; white-space: pre-wrap; word-break: break-word; }
-    .diff-row .diff-gutter { width: 16px; flex-shrink: 0; color: #6a737d; user-select: none; }
-    .diff-row .diff-text { flex: 1; }
-    .diff-row.add { background: #e6ffed; }
-    .diff-row.add .diff-gutter { color: #22863a; }
-    .diff-row.del { background: #ffeef0; }
-    .diff-row.del .diff-gutter { color: #cb2431; }
-    .diff-row.eq { color: #57606a; }
+    /* Two-way: the developer's changed paragraphs are highlighted in place in
+       the editor; the side panel shows the reviewer's last-seen version for
+       reference. The highlight is a positioned overlay (see
+       highlightChangedParagraphs) rather than a class on the paragraph
+       itself, since ProseMirror reconciles away classes added directly to
+       its own contentDOM nodes. */
+    .paragraph-changed-overlay {
+      position: absolute;
+      background: rgba(46, 160, 67, 0.15);
+      border-radius: 3px;
+      pointer-events: none;
+    }
+    .reference-subheading {
+      padding: 8px 12px 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: #6a737d;
+    }
+    .reference-plain {
+      margin: 0;
+      padding: 0 12px 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.5;
+    }
 
     /* Three-way column header + rows */
     #threeway-head { display: flex; border-bottom: 1px solid #e1e4e8; background: #f6f8fa; position: sticky; top: 0; }
@@ -641,23 +661,85 @@
     if (el) el.classList.add('edited');
   }
 
-  // Build the unified two-way diff (what moved upstream since last look) into
-  // a container element.
-  function buildUnifiedDiff(container, rows) {
-    const gutter = { eq: ' ', add: '+', del: '-' };
-    rows.forEach(r => {
-      const row = document.createElement('div');
-      row.className = 'diff-row ' + r.type;
-      const g = document.createElement('span');
-      g.className = 'diff-gutter';
-      g.textContent = gutter[r.type] || ' ';
-      const t = document.createElement('span');
-      t.className = 'diff-text';
-      t.textContent = r.text;
-      row.appendChild(g);
-      row.appendChild(t);
-      container.appendChild(row);
+  // Two-way side panel: the reviewer's last-seen version, for reference
+  // alongside the now-current editor (which mounts on upstream).
+  function buildPreviousVersion(container, seenContent) {
+    const heading = document.createElement('div');
+    heading.className = 'reference-subheading';
+    heading.textContent = 'Your last-seen version';
+    container.appendChild(heading);
+    const pre = document.createElement('pre');
+    pre.className = 'reference-plain';
+    pre.textContent = seenContent || '';
+    container.appendChild(pre);
+  }
+
+  // Highlight, in place, the paragraphs the developer changed (two-way case)
+  // so the reviewer sees exactly where the file moved without a duplicate
+  // line-by-line diff. Matches by exact paragraph text against the diff's
+  // added lines, consistent with how comment re-anchoring matches paragraphs.
+  //
+  // The highlight is drawn as absolutely-positioned overlay bars in
+  // #editor-wrap rather than a class on the paragraph itself: ProseMirror's
+  // own DOM observer watches its contentDOM (.ProseMirror) and reconciles
+  // away any class we add directly to its nodes almost immediately, since
+  // that attribute isn't part of its document model. Overlaying outside that
+  // subtree sidesteps the observer entirely.
+  let changeHighlightEls = [];
+  let changeHighlightScrollTarget = null;
+  let changeHighlightReposition = null;
+
+  function clearChangeHighlights() {
+    changeHighlightEls.forEach(el => el.remove());
+    changeHighlightEls = [];
+    if (changeHighlightScrollTarget && changeHighlightReposition) {
+      changeHighlightScrollTarget.removeEventListener('scroll', changeHighlightReposition);
+      window.removeEventListener('resize', changeHighlightReposition);
+    }
+    changeHighlightScrollTarget = null;
+    changeHighlightReposition = null;
+  }
+
+  // Returns the number of paragraphs matched and highlighted.
+  function highlightChangedParagraphs(diffRows) {
+    clearChangeHighlights();
+    const root = proseMirrorRoot();
+    if (!root || !diffRows) return 0;
+    const addedTexts = new Set(diffRows.filter(r => r.type === 'add' && r.text).map(r => r.text));
+    const matched = Array.from(root.children).filter(el => addedTexts.has(el.textContent));
+    if (!matched.length) return 0;
+
+    const wrap = document.getElementById('editor-wrap');
+    // Appended (and so painted on top of the editor's own opaque background)
+    // but translucent and pointer-events:none, so the text reads through it
+    // and clicks/selection still reach the editor underneath.
+    const bars = matched.map(() => {
+      const bar = document.createElement('div');
+      bar.className = 'paragraph-changed-overlay';
+      wrap.appendChild(bar);
+      return bar;
     });
+
+    function reposition() {
+      const wrapRect = wrap.getBoundingClientRect();
+      matched.forEach((el, i) => {
+        const r = el.getBoundingClientRect();
+        const bar = bars[i];
+        bar.style.top = (r.top - wrapRect.top + wrap.scrollTop) + 'px';
+        bar.style.left = (r.left - wrapRect.left + wrap.scrollLeft) + 'px';
+        bar.style.width = r.width + 'px';
+        bar.style.height = r.height + 'px';
+      });
+    }
+    reposition();
+
+    changeHighlightEls = bars;
+    changeHighlightScrollTarget = root;
+    changeHighlightReposition = reposition;
+    root.addEventListener('scroll', reposition);
+    window.addEventListener('resize', reposition);
+
+    return matched.length;
   }
 
   // Marker shown in each row's left gutter (GitHub-style), so the signal reads
@@ -731,25 +813,28 @@
     });
   }
 
-  // Show the reference pane above the editor: a two-way diff of what moved, or
-  // the three-way comparison the reviewer re-applies their edits from. The
-  // editor still mounts on upstream — the pane is reference, not a gate.
+  // Show the reference pane beside the editor: for two-way, the developer's
+  // changed paragraphs are highlighted in place in the editor (see
+  // highlightChangedParagraphs) and this panel is just the reviewer's
+  // last-seen version, for comparison. For three-way it's the Original /
+  // Your-edits reconcile the reviewer re-applies their edits from. The editor
+  // itself always mounts on upstream — the pane is reference, not a gate.
   function showReference(data) {
     const area = document.getElementById('editor-area');
     const panel = document.getElementById('reference-panel');
     const label = document.getElementById('reference-label');
     const body = document.getElementById('reference-body');
     body.innerHTML = '';
+    area.classList.add('reconcile');
     if (data.view === 'three_way') {
-      // Side-by-side reconcile: reference left, editor (upstream) right.
-      area.classList.add('reconcile');
       label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) in the editor; the left marker and color show your changes, the author’s upstream changes, and conflicts (see legend).';
       buildThreeWay(body, data.diff || []);
     } else {
-      // Informational "what moved", stacked above the editor.
-      area.classList.remove('reconcile');
-      label.textContent = "This file changed since you last looked at it. Here's what moved:";
-      buildUnifiedDiff(body, data.diff || []);
+      const changed = highlightChangedParagraphs(data.diff);
+      label.textContent = changed === 1
+        ? 'The developer changed this file — 1 paragraph updated, highlighted in the editor.'
+        : `The developer changed this file — ${changed} paragraphs updated, highlighted in the editor.`;
+      buildPreviousVersion(body, data.seen);
     }
     panel.classList.remove('collapsed');
     document.getElementById('reference-toggle').textContent = 'Hide';
@@ -757,6 +842,7 @@
   }
 
   function hideReference() {
+    clearChangeHighlights();
     document.getElementById('reference-panel').style.display = 'none';
     document.getElementById('editor-area').classList.remove('reconcile');
   }
@@ -825,10 +911,10 @@
         a.textContent = anchorEl ? c.anchor_text : (c.anchor_text + '  — no longer in the document');
         if (anchorEl) a.onclick = () => highlightParagraph(anchorEl);
         item.appendChild(a);
-      } else if (c.file_path == null) {
+      } else {
         const g = document.createElement('div');
         g.className = 'comment-general';
-        g.textContent = 'General';
+        g.textContent = c.file_path != null ? `General · ${c.file_path}` : 'General';
         item.appendChild(g);
       }
       const body = document.createElement('div');
@@ -955,6 +1041,10 @@
     const wrap = document.getElementById('editor-wrap');
     wrap.style.display = 'flex';
 
+    // Overlay highlight bars live in #editor-wrap, not inside the editor's
+    // own DOM, so editor.destroy() below won't clean them up — clear them
+    // explicitly before mounting the next file's editor.
+    clearChangeHighlights();
     if (editor) editor.destroy();
 
     editor = new toastui.Editor({
@@ -1014,11 +1104,13 @@
     const hasReference = data.view === 'two_way' || data.view === 'three_way';
     const editContent = hasReference ? data.upstream : data.content;
 
-    if (hasReference) showReference(data);
-    else hideReference();
-
     fileOriginals[filePath] = editContent;
     mountEditor(editContent);
+
+    // Highlighting changed paragraphs (two-way) reads the editor's DOM, so
+    // the reference pane is built after the editor mounts, not before.
+    if (hasReference) showReference(data);
+    else hideReference();
     refreshSubmitButton();
   }
 
