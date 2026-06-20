@@ -7,3 +7,5 @@ Try deleting and adding a bunch of new lines, changing a new test word, [DEVELOP
 This is a new line.
 
 This is the reviewer's new line.
+
+This is a new developer's line.
