@@ -3,8 +3,7 @@
 **Goal:** Bring the codebase into compliance with `docs/design/functional-spec.md`.
 This plan is written to be executed by **smaller/cheaper models**: each task is
 small, mechanical, names exact files and symbols, gives the precise logic, and
-ends with a runnable verification (`npm test`). Do the phases **in order** — each
-builds on the last.
+ends with a runnable verification (`npm test`). 
 
 ---
 
