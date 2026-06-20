@@ -6,6 +6,6 @@ Try deleting and adding a bunch of new lines, changing a new test word, [DEVELOP
 
 This is a new line.
 
-This is the reviewer's new line.
+This is the reviewer's new line, made by the awesome reviewer.
 
 This is a dev's new line.
