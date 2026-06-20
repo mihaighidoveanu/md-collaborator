@@ -9,3 +9,5 @@ This is a new line.
 This is the reviewer's new line, made by the awesome reviewer.
 
 This is a dev's new line.
+
+This is one more line by the dev.
