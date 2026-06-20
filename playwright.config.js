@@ -12,10 +12,7 @@ module.exports = defineConfig({
   testDir: './tests/e2e',
   testMatch: /.*\.spec\.js/,
   timeout: 30000,
-  // Sandboxed environments may route outbound HTTPS through a TLS-intercepting
-  // egress proxy whose CA Chromium doesn't trust by default; Node/curl trust it
-  // via the system CA bundle, but the browser needs this to load the CDN scripts.
-  use: { baseURL: `http://127.0.0.1:${PORT}`, ignoreHTTPSErrors: true },
+  use: { baseURL: `http://127.0.0.1:${PORT}` },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
     command: `node tests/e2e/fixtureServer.js`,
