@@ -156,6 +156,7 @@
 
     /* Two-column diff: the reviewer's prior version (left) against the
        developer's current upstream (right). */
+    .tw-sticky-header { position: sticky; top: 0; z-index: 2; }
     .tw-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 12px; background: #f6f8fa; border-bottom: 1px solid #e1e4e8; }
     .tw-legend .tw-key {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -180,7 +181,7 @@
     .tw-legend .tw-key.changed .tw-chip { background: #ffe1b3; color: #9a6700; }
     .tw-legend .tw-key.addition .tw-chip { background: #e6ffed; color: #22863a; }
     .tw-legend .tw-key.deletion .tw-chip { background: #ffeef0; color: #cb2431; }
-    #threeway-head { display: flex; border-bottom: 1px solid #e1e4e8; background: #f6f8fa; position: sticky; top: 0; }
+    #threeway-head { display: flex; border-bottom: 1px solid #e1e4e8; background: #f6f8fa; }
     #threeway-head .tw-col {
       flex: 1;
       padding: 8px 12px;
@@ -456,7 +457,7 @@
     <div id="reference-panel" style="display:none">
       <div id="reference-header">
         <span id="reference-label"></span>
-        <button id="reference-toggle">Hide</button>
+        <button id="reference-toggle">Hide history</button>
       </div>
       <div id="reference-body"></div>
     </div>
@@ -656,14 +657,14 @@
 
   // Build the two-column reference panel: left = the reviewer's prior
   // version (their unsent edit, or their last-seen version if they hadn't
-  // edited), right = the developer's current upstream. changedWord controls
-  // whether a paired row reads as a "conflict" (there's a pending edit at
-  // stake) or a plain "changed" (no-edit case — nothing of the reviewer's
-  // is at risk, it's purely informational).
-  function buildTwoColumnDiff(container, rows, leftLabel, changedWord) {
+  // edited), right = the developer's current upstream.
+  function buildTwoColumnDiff(container, rows, leftLabel, rightLabel) {
+    const stickyHeader = document.createElement('div');
+    stickyHeader.className = 'tw-sticky-header';
+
     const legend = document.createElement('div');
     legend.className = 'tw-legend';
-    [['changed', changedWord], ['addition', 'Developer added'], ['deletion', 'Developer removed']]
+    [['changed', 'Changed'], ['addition', 'Added'], ['deletion', 'Removed']]
       .forEach(([cls, text]) => {
         const key = document.createElement('span');
         key.className = 'tw-key ' + cls;
@@ -674,17 +675,18 @@
         key.appendChild(document.createTextNode(' ' + text));
         legend.appendChild(key);
       });
-    container.appendChild(legend);
+    stickyHeader.appendChild(legend);
 
     const head = document.createElement('div');
     head.id = 'threeway-head';
-    [leftLabel, "Developer's version"].forEach(label => {
+    [leftLabel, rightLabel].forEach(label => {
       const col = document.createElement('div');
       col.className = 'tw-col';
       col.textContent = label;
       head.appendChild(col);
     });
-    container.appendChild(head);
+    stickyHeader.appendChild(head);
+    container.appendChild(stickyHeader);
 
     pairDiffRows(rows).forEach(r => {
       if (r.kind === 'eq') {
@@ -728,14 +730,14 @@
     body.innerHTML = '';
     area.classList.add('reconcile');
     if (data.diffSource === 'edit') {
-      label.textContent = 'The developer changed this file since you last looked at it. Your draft edits were overwritten. Review and apply again, if necessary.';
-      buildTwoColumnDiff(body, data.diff, 'Your last-seen version', 'Developer\'s version');
+      label.textContent = 'Your draft edits were overwritten by updates from development team. Review and apply again, if necessary.';
+      buildTwoColumnDiff(body, data.diff, 'Your draft version', 'Developer\'s version');
     } else {
       label.textContent = 'The developer changed this file since you last looked at it.';
-      buildTwoColumnDiff(body, data.diff, 'Your last-seen version', 'Changed');
+      buildTwoColumnDiff(body, data.diff, 'Your last-seen version', 'Updates');
     }
     panel.classList.remove('collapsed');
-    document.getElementById('reference-toggle').textContent = 'Hide';
+    document.getElementById('reference-toggle').textContent = 'Hide history';
     panel.style.display = 'flex';
   }
 
@@ -1216,7 +1218,7 @@
     document.getElementById('reference-toggle').addEventListener('click', () => {
       const panel = document.getElementById('reference-panel');
       const collapsed = panel.classList.toggle('collapsed');
-      document.getElementById('reference-toggle').textContent = collapsed ? 'See history' : 'Hide';
+      document.getElementById('reference-toggle').textContent = collapsed ? 'See history' : 'Hide history';
     });
 
     // Comments: general-comment button, composer, panel collapse.
