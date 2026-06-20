@@ -994,7 +994,7 @@
     closeComposer();
 
     // Save pending changes for previous file before switching
-    if (currentFile && editor) {
+    if (currentFile && editor && editorDirty) {
       clearTimeout(saveTimer);
       await saveCurrentFile();
     }
@@ -1113,14 +1113,12 @@
   function refreshSubmitButton() {
     const btn = document.getElementById('approve-btn');
     if (!btn || !sessionData) return;
+    btn.disabled = false;
     if (hasPendingEdits()) {
-      btn.disabled = false;
       btn.textContent = 'Submit changes';
-    } else if (sessionData.settled) {
-      btn.disabled = true;
-      btn.textContent = 'No pending changes';
+    } else if (sessionData.approved_at) {
+      btn.textContent = 'Approved ✓'; // still clickable to re-approve
     } else {
-      btn.disabled = false;
       btn.textContent = 'Approve';
     }
   }
@@ -1151,7 +1149,7 @@
   async function submit() {
     // Flush pending editor changes first so the server sees accurate dirty rows.
     clearTimeout(saveTimer);
-    await saveCurrentFile();
+    if (editorDirty) await saveCurrentFile();
 
     const pending = hasPendingEdits();
     const unvisited = (sessionData?.files || []).filter(f => !f.visited).map(f => f.path);
@@ -1188,13 +1186,11 @@
       const result = await api('POST', '/submit');
       if (result.action === 'approved') {
         sessionData.approved_at = Date.now();
-        sessionData.settled = true;
         showToast('Approval sent to the developers', 3000);
       } else {
         sessionData.submitted_branch = result.branch;
         sessionData.submitted_pr_number = result.pr_number;
         sessionData.submitted_pr_url = result.pr_url;
-        sessionData.settled = true;
         (sessionData.files || []).forEach(f => { f.dirty = false; });
         editorDirty = false;
         showReviewPrBanner();
