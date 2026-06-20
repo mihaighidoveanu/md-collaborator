@@ -38,13 +38,35 @@ function originalPrUrl(session) {
   return `https://github.com/${session.owner}/${session.repo}/pull/${session.pr_number}`;
 }
 
-// The branch the reviewer's edits currently live on. It starts as the original
-// PR's head branch and moves to the fallback branch once a merge/close opens a
-// new PR (functional-spec.md §2.1). Reads and the "settled" check track this
-// branch rather than head_branch, which may have been deleted when the original
-// PR merged.
-function currentBranchOf(session) {
-  return session.submitted_branch ?? session.head_branch;
+// Resolve the "current PR" — the original developer PR until a merge/close
+// fallback opens a new one (functional-spec.md §2.1, §7). Self-heals stale
+// submitted_* data left over by the retired submission model that used to
+// open a fresh review branch + PR on every single submit: per the data-model
+// invariant, the current PR can only have moved away from the original PR if
+// that PR was itself found merged/closed, so an original observed open right
+// now means the original IS the current PR regardless of what's stored. The
+// stale columns are cleared on the session so later calls skip this check.
+async function resolveCurrentPr(db, github, session) {
+  if (session.submitted_pr_number != null) {
+    let original;
+    try {
+      original = await github.getPRState(session.owner, session.repo, session.pr_number);
+    } catch {
+      original = null; // best-effort: a blip leaves the stored value trusted for now
+    }
+    if (original && original.state === 'open' && !original.merged) {
+      db.prepare(`UPDATE sessions SET submitted_pr_number = NULL, submitted_pr_url = NULL, submitted_branch = NULL WHERE id = ?`)
+        .run(session.id);
+      session.submitted_pr_number = null;
+      session.submitted_pr_url = null;
+      session.submitted_branch = null;
+    }
+  }
+  return {
+    prNumber: session.submitted_pr_number ?? session.pr_number,
+    branch: session.submitted_branch ?? session.head_branch,
+    url: session.submitted_pr_url ?? originalPrUrl(session),
+  };
 }
 
 function createReviewRouter({ db, github }) {
@@ -95,13 +117,15 @@ function createReviewRouter({ db, github }) {
         visited: visitedPaths.has(f.filename),
       }));
 
+      const current = await resolveCurrentPr(db, github, session);
+
       // "Settled": the reviewer's last action (approve or commit-submit) still
       // reflects the current state of the target branch — nothing to act on
       // again yet. Best-effort: a blip leaves it unsettled (button stays clickable)
       // rather than getting stuck disabled.
       let settled = false;
       try {
-        const liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, currentBranchOf(session));
+        const liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, current.branch);
         settled = !!session.last_action_sha && liveHeadSha === session.last_action_sha;
       } catch {}
 
@@ -114,8 +138,8 @@ function createReviewRouter({ db, github }) {
         submitted_branch: session.submitted_branch,
         submitted_pr_number: session.submitted_pr_number,
         submitted_pr_url: session.submitted_pr_url,
-        current_pr_number: session.submitted_pr_number ?? session.pr_number,
-        current_pr_url: session.submitted_pr_url ?? originalPrUrl(session),
+        current_pr_number: current.prNumber,
+        current_pr_url: current.url,
         approved_at: session.approved_at,
         settled,
         files,
@@ -144,18 +168,23 @@ function createReviewRouter({ db, github }) {
     }
 
     const edit = db.prepare(
-      'SELECT content, original_content, base_sha FROM file_edits WHERE session_id = ? AND file_path = ?'
+      'SELECT content, original_content, base_sha, dirty FROM file_edits WHERE session_id = ? AND file_path = ?'
     ).get(session.id, filePath);
     const visit = db.prepare(
       'SELECT seen_content, seen_sha FROM file_visits WHERE session_id = ? AND file_path = ?'
     ).get(session.id, filePath);
-    const mine = edit ? edit.content : null;
+    // Only an uncommitted (dirty) edit counts as "mine" to reconcile — a row
+    // left clean by a prior commit-submit is a baseline, not a pending edit,
+    // so reopening it follows the same change-aware (two-way) path as an
+    // unedited file instead of being mistaken for unsent edits (REQ-16 R16.3).
+    const mine = edit && edit.dirty ? edit.content : null;
 
     // Resolve the live branch head. The read is best-effort for display: a blip
     // falls back to the session's original head rather than blocking the reviewer.
     let liveHeadSha;
     try {
-      liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, currentBranchOf(session));
+      const current = await resolveCurrentPr(db, github, session);
+      liveHeadSha = await github.getCurrentHeadSha(session.owner, session.repo, current.branch);
     } catch {
       liveHeadSha = session.head_sha;
     }
@@ -294,8 +323,9 @@ function createReviewRouter({ db, github }) {
         // into a reported failure — fall back to null ("settled" unknown/false).
         let settledSha = null;
         try {
+          const current = await resolveCurrentPr(db, github, session);
           settledSha = await withRetry(() =>
-            github.getCurrentHeadSha(session.owner, session.repo, currentBranchOf(session)));
+            github.getCurrentHeadSha(session.owner, session.repo, current.branch));
         } catch {}
         db.prepare('UPDATE sessions SET approved_at = ?, last_action_sha = ? WHERE id = ?')
           .run(Date.now(), settledSha, session.id);
@@ -311,8 +341,7 @@ function createReviewRouter({ db, github }) {
     // while the current PR stays open — every submit is a plain commit onto
     // its own branch's live head. A new branch + PR appears only as a
     // fallback once that PR is found merged or closed.
-    const currentPrNumber = session.submitted_pr_number ?? session.pr_number;
-    const currentBranch = session.submitted_branch ?? session.head_branch;
+    const { prNumber: currentPrNumber, branch: currentBranch } = await resolveCurrentPr(db, github, session);
 
     const { merged, state } = await withRetry(() =>
       github.getPRState(session.owner, session.repo, currentPrNumber));
@@ -386,7 +415,7 @@ function createReviewRouter({ db, github }) {
 
       // The commit always lands on the current branch — the open current PR's
       // own branch, or the fallback branch we just opened and made current
-      // above. Reads track that same branch (currentBranchOf), so the new
+      // above. Reads track that same branch (resolveCurrentPr), so the new
       // baseline is exactly this commit. No extra read of head_branch, which
       // may have been deleted when the original PR merged.
       const targetHeadSha = newCommitSha;
@@ -394,11 +423,26 @@ function createReviewRouter({ db, github }) {
       db.prepare('UPDATE sessions SET last_action_sha = ? WHERE id = ?')
         .run(targetHeadSha, session.id);
 
-      // D3 — advance baselines so the next round starts clean.
+      // D3 — advance baselines so the next round starts clean. The "seen"
+      // watermark advances together with the edit baseline so a later GET
+      // diffs the next real upstream change against what was just committed,
+      // not against the reviewer's own pre-edit content (which would
+      // otherwise resurface as a phantom part of the next diff).
       const advance = db.prepare(`UPDATE file_edits
          SET dirty = 0, original_content = content, base_sha = ?
          WHERE session_id = ? AND file_path = ?`);
-      for (const f of dirtyFiles) advance.run(targetHeadSha, session.id, f.file_path);
+      const advanceVisit = db.prepare(`
+        INSERT INTO file_visits (session_id, file_path, visited_at, seen_content, seen_sha)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(session_id, file_path) DO UPDATE SET
+          visited_at = excluded.visited_at,
+          seen_content = excluded.seen_content,
+          seen_sha = excluded.seen_sha
+      `);
+      for (const f of dirtyFiles) {
+        advance.run(targetHeadSha, session.id, f.file_path);
+        advanceVisit.run(session.id, f.file_path, Date.now(), f.content, targetHeadSha);
+      }
 
       // status stays 'active' (D4) — never set 'submitted'.
       res.json({ ok: true, action: 'submitted', pr_number: prNumber, pr_url: prUrl, branch: committedBranch });

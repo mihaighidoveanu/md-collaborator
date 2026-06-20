@@ -577,6 +577,47 @@ test('R18.6 a transient blip checking the current branch is retried, not mistake
   assert.equal(github.calls.commitChanges[0].branch, 'feature', 'still commits onto the open PR branch');
 });
 
+test('a stale review PR/branch left by the retired per-submit model is ignored while the original PR is open', async () => {
+  // Before the §2.1 rework, every submit opened a brand-new review branch +
+  // review PR. A session that went through that old flow has
+  // submitted_pr_number/submitted_branch already pointing at that leftover
+  // PR/branch. If the original PR is still open, the new code must not trust
+  // that stale data as "current" — it must commit straight onto the
+  // original's own branch, exactly as a fresh session would.
+  active = await setup({
+    extraPrs: {
+      'acme/docs#4': { state: 'open', title: 'Old review PR', head: { ref: 'review/pr1-old' }, base: { ref: 'feature' } },
+    },
+    submitted: {
+      submitted_pr_number: 4,
+      submitted_pr_url: 'https://github.com/acme/docs/pull/4',
+      submitted_branch: 'review/pr1-old',
+    },
+  });
+  const { ctx, github, session } = active;
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  assert.equal(meta.json.current_pr_number, 1, 'the meta endpoint reports the original PR as current, not the stale one');
+  assert.equal(meta.json.current_pr_url, 'https://github.com/acme/docs/pull/1');
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+  const res = await ctx.request('POST', `/review/api/${session.token}/submit`);
+
+  assert.equal(res.status, 200);
+  assert.equal(github.calls.createBranch.length, 0, 'no new branch — the original PR is open');
+  assert.equal(github.calls.createPullRequest.length, 0, 'no new PR — the original PR is open');
+  assert.equal(github.calls.commitChanges.length, 1);
+  assert.equal(github.calls.commitChanges[0].branch, 'feature', 'commits onto the original PR\'s own branch, not the stale review branch');
+  assert.equal(res.json.pr_number, 1, 'the original PR, not the stale review PR');
+  assert.equal(res.json.pr_url, 'https://github.com/acme/docs/pull/1');
+
+  const row = ctx.db.prepare('SELECT submitted_pr_number, submitted_pr_url, submitted_branch FROM sessions WHERE id = ?').get(session.id);
+  assert.equal(row.submitted_pr_number, null, 'the stale review PR reference is cleared');
+  assert.equal(row.submitted_pr_url, null);
+  assert.equal(row.submitted_branch, null, 'the stale review branch reference is cleared');
+});
+
 // REQ-19 — "Approve" posts a GitHub review on the original PR (D1).
 
 test('R19.1 a failed approval leaves the session unchanged', async () => {
@@ -631,7 +672,7 @@ test('after a commit-submit, re-opening the file with no further edits stays pla
   assert.equal(res.json.content, '# Intro\nedited\n');
 });
 
-test('after a commit-submit, a later real upstream move is still detected as drift', async () => {
+test('after a commit-submit, a later real upstream move opens a two-way diff, not a phantom three-way', async () => {
   active = await setup();
   const { ctx, github, session } = active;
   const p = filePath('docs/intro.md');
@@ -644,8 +685,13 @@ test('after a commit-submit, a later real upstream move is still detected as dri
   github.pushCommit('acme', 'docs', 'feature', 'sha-after-submit', { 'docs/intro.md': '# Intro\ndeveloper change\n' });
 
   const res = await ctx.request('GET', `/review/api/${session.token}/files/${p}`);
-  assert.equal(res.json.view, 'three_way', 'a genuine upstream move after the commit is still reconciled, not masked');
+  // The reviewer has no pending edits after a commit-submit (dirty was reset
+  // to 0), so a later upstream move is change-aware (REQ-15), not a
+  // reconciliation of unsent edits (REQ-16 three-way) — there are none to
+  // reconcile, and the reviewer never touched anything since submitting.
+  assert.equal(res.json.view, 'two_way', 'a genuine upstream move after the commit is a plain diff, not a phantom three-way');
   assert.equal(res.json.upstream, '# Intro\ndeveloper change\n');
+  assert.equal(res.json.seen, '# Intro\nedited\n', 'the watermark is the just-committed content, not the reviewer\'s stale pre-edit baseline');
 });
 
 // "Settled": the submit button disables ("No pending changes") only once the
