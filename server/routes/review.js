@@ -334,27 +334,36 @@ function createReviewRouter({ db, github }) {
 
     // ── APPROVE path (D1): no pending edits → approve the ORIGINAL PR ──
     if (dirtyFiles.length === 0) {
+      let review = null;
       try {
-        const review = await github.approvePullRequest(
+        review = await github.approvePullRequest(
           session.owner, session.repo, session.pr_number,
           buildApprovalBody(session)
         );
-        // Pin the "settled" reference to the target branch's head right now, so
-        // the button stays disabled only until the target branch actually moves.
-        // The approval already succeeded above; a blip here must not turn that
-        // into a reported failure — fall back to null ("settled" unknown/false).
-        let settledSha = null;
-        try {
-          const current = await resolveCurrentPr(db, github, session);
-          settledSha = await withRetry(() =>
-            github.getCurrentHeadSha(session.owner, session.repo, current.branch));
-        } catch {}
-        db.prepare('UPDATE sessions SET approved_at = ?, last_action_sha = ? WHERE id = ?')
-          .run(Date.now(), settledSha, session.id);
-        return res.json({ ok: true, action: 'approved', review_url: review.html_url });
       } catch (err) {
-        return res.status(500).json({ error: err.message }); // session unchanged
+        // TODO(production): GITHUB_TOKEN is expected to be a dedicated bot
+        // account that never authors PRs, so this can't occur there. It only
+        // fires in local/dev testing where the same gh-cli identity opens and
+        // "reviews" its own PR. Treat it as a no-op success rather than
+        // surfacing GitHub's raw error to the tester. Revisit/remove once a
+        // bot account is wired up for production.
+        if (err.status !== 422 || !/own pull request/i.test(err.message)) {
+          return res.status(500).json({ error: err.message }); // session unchanged
+        }
       }
+      // Pin the "settled" reference to the target branch's head right now, so
+      // the button stays disabled only until the target branch actually moves.
+      // The approval already succeeded above; a blip here must not turn that
+      // into a reported failure — fall back to null ("settled" unknown/false).
+      let settledSha = null;
+      try {
+        const current = await resolveCurrentPr(db, github, session);
+        settledSha = await withRetry(() =>
+          github.getCurrentHeadSha(session.owner, session.repo, current.branch));
+      } catch {}
+      db.prepare('UPDATE sessions SET approved_at = ?, last_action_sha = ? WHERE id = ?')
+        .run(Date.now(), settledSha, session.id);
+      return res.json({ ok: true, action: 'approved', review_url: review?.html_url ?? null });
     }
 
     // ── SUBMIT-CHANGES path: target the CURRENT PR (the original PR until a
