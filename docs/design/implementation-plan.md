@@ -1,5 +1,7 @@
 # Implementation Plan — Align Code with `functional-spec.md`
 
+Can we delete this?
+
 **Goal:** Bring the codebase into compliance with `docs/design/functional-spec.md`.
 This plan is written to be executed by **smaller/cheaper models**: each task is
 small, mechanical, names exact files and symbols, gives the precise logic, and
