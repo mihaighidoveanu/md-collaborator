@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { lineDiff, threeWay } = require('../../server/lib/diff');
+const { lineDiff } = require('../../server/lib/diff');
 
 test('lineDiff: unchanged text produces all eq rows', () => {
   const rows = lineDiff('a\nb\nc', 'a\nb\nc');
@@ -49,120 +49,17 @@ test('lineDiff: duplicate lines are not duplicated or reordered', () => {
   );
 });
 
-test('threeWay: identical on both sides yields no changes and no conflicts', () => {
-  const rows = threeWay('a\nb\nc', 'a\nb\nc', 'a\nb\nc');
-  assert.ok(rows.every(r => !r.upstreamChanged && !r.mineChanged && !r.conflict));
-  assert.deepEqual(rows.map(r => r.base), ['a', 'b', 'c']);
-});
-
-test('threeWay: upstream-only change is not a conflict', () => {
-  const rows = threeWay('line one\nline two\nline three', 'line one\nline TWO changed\nline three', 'line one\nline two\nline three');
-  const row = rows.find(r => r.base === 'line two');
-  assert.equal(row.upstream, 'line TWO changed');
-  assert.equal(row.mine, 'line two');
-  assert.equal(row.upstreamChanged, true);
-  assert.equal(row.mineChanged, false);
-  assert.equal(row.conflict, false);
-});
-
-test('threeWay: mine-only change is not a conflict', () => {
-  const rows = threeWay('line one\nline two\nline three', 'line one\nline two\nline three', 'line one\nline TWO mine\nline three');
-  const row = rows.find(r => r.base === 'line two');
-  assert.equal(row.upstream, 'line two');
-  assert.equal(row.mine, 'line TWO mine');
-  assert.equal(row.upstreamChanged, false);
-  assert.equal(row.mineChanged, true);
-  assert.equal(row.conflict, false);
-});
-
-test('threeWay: both sides change the same base line differently is a conflict', () => {
-  const rows = threeWay('a\nb\nc', 'a\nB-upstream\nc', 'a\nB-mine\nc');
-  const row = rows.find(r => r.base === 'b');
-  assert.equal(row.upstream, 'B-upstream');
-  assert.equal(row.mine, 'B-mine');
-  assert.equal(row.upstreamChanged, true);
-  assert.equal(row.mineChanged, true);
-  assert.equal(row.conflict, true);
-});
-
-test('threeWay: both sides change the same base line to the same value is not a conflict', () => {
-  const rows = threeWay('a\nb\nc', 'a\nSAME\nc', 'a\nSAME\nc');
-  const row = rows.find(r => r.base === 'b');
-  assert.equal(row.upstream, 'SAME');
-  assert.equal(row.mine, 'SAME');
-  assert.equal(row.conflict, false);
-});
-
-test('threeWay: one side deletes, the other edits the same line is a conflict', () => {
-  const rows = threeWay('a\nb\nc', 'a\nc', 'a\nB-edited\nc');
-  const row = rows.find(r => r.base === 'b');
-  assert.equal(row.upstream, null);
-  assert.equal(row.mine, 'B-edited');
-  assert.equal(row.upstreamChanged, true);
-  assert.equal(row.mineChanged, true);
-  assert.equal(row.conflict, true);
-});
-
-test('threeWay: upstream-only insertion is not a conflict', () => {
-  const rows = threeWay('a\nb', 'a\nx\nb', 'a\nb');
-  const inserted = rows.find(r => r.base === null);
-  assert.ok(inserted, 'an inserted row exists');
-  assert.equal(inserted.upstream, 'x');
-  assert.equal(inserted.mine, null);
-  assert.equal(inserted.conflict, false);
-  // Inserted row appears between the two unchanged base rows.
-  const order = rows.map(r => r.base);
-  assert.deepEqual(order, ['a', null, 'b']);
-});
-
-test('threeWay: both sides insert different content at the same anchor is a conflict', () => {
-  const rows = threeWay('a\nb', 'a\nx\nb', 'a\ny\nb');
-  const inserted = rows.find(r => r.base === null);
-  assert.equal(inserted.upstream, 'x');
-  assert.equal(inserted.mine, 'y');
-  assert.equal(inserted.conflict, true);
-});
-
-test('threeWay: both sides insert the same content at the same anchor is not a conflict', () => {
-  const rows = threeWay('a\nb', 'a\nx\nb', 'a\nx\nb');
-  const inserted = rows.find(r => r.base === null);
-  assert.equal(inserted.upstream, 'x');
-  assert.equal(inserted.mine, 'x');
-  assert.equal(inserted.conflict, false);
-});
-
-test('threeWay: duplicate lines are aligned without reordering or dropping', () => {
-  // Mirrors R10.2's duplicate-line rigor: base has three "a" lines, mine
-  // changes only the line right before the last one.
-  const rows = threeWay('a\nb\na\nc\na', 'a\nb\na\nc\na', 'a\nb\na\nCHANGED\na');
-  assert.deepEqual(rows.map(r => r.base), ['a', 'b', 'a', 'c', 'a']);
-  const aRows = rows.filter(r => r.base === 'a');
-  assert.equal(aRows.length, 3, 'all three "a" base lines are present exactly once');
-  assert.ok(aRows.every(r => !r.upstreamChanged && !r.mineChanged && !r.conflict));
-  const changedRow = rows.find(r => r.base === 'c');
-  assert.equal(changedRow.mine, 'CHANGED');
-  assert.equal(changedRow.upstream, 'c');
-  assert.equal(changedRow.conflict, false);
-});
-
-test('threeWay: multi-line equal-length replacement pairs index-for-index', () => {
-  const rows = threeWay('a\nb\nc\nd', 'a\nX\nY\nd', 'a\nb\nc\nd');
-  assert.equal(rows.find(r => r.base === 'b').upstream, 'X');
-  assert.equal(rows.find(r => r.base === 'c').upstream, 'Y');
-});
-
-test('threeWay: a trailing newline on only one side does not misalign the last changed line', () => {
+test('lineDiff: a trailing newline on only one side does not misalign the last changed line', () => {
   // GitHub's raw content ends with "\n"; the editor's serialized markdown
-  // often doesn't. Without normalizing that, "mine" has one fewer split
-  // line than base/upstream, shifting the LCS pairing and splitting the
-  // last paragraph's edit into two disjoint rows instead of one.
-  const base = 'a\nb\nold last line\n';
-  const upstream = 'a\nb\nupstream last line\n';
-  const mine = 'a\nb\nmine last line';
-  const rows = threeWay(base, upstream, mine);
-  const changedRow = rows.find(r => r.base === 'old last line');
-  assert.ok(changedRow, 'the changed base line is present as its own row');
-  assert.equal(changedRow.upstream, 'upstream last line');
-  assert.equal(changedRow.mine, 'mine last line');
-  assert.equal(changedRow.conflict, true);
+  // often doesn't. Without normalizing that, one side has one fewer split
+  // line than the other, shifting the LCS pairing for the last line.
+  const oldText = 'a\nb\nold last line\n';
+  const newText = 'a\nb\nnew last line';
+  const rows = lineDiff(oldText, newText);
+  assert.deepEqual(rows, [
+    { type: 'eq', text: 'a' },
+    { type: 'eq', text: 'b' },
+    { type: 'add', text: 'new last line' },
+    { type: 'del', text: 'old last line' },
+  ]);
 });

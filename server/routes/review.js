@@ -1,7 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { reconstructMinimalContent } = require('../lib/minimalDiff');
-const { lineDiff, threeWay } = require('../lib/diff');
+const { lineDiff } = require('../lib/diff');
 const { withRetry } = require('../lib/retry');
 const createSessionMiddleware = require('../middleware/session');
 
@@ -222,15 +222,18 @@ function createReviewRouter({ db, github }) {
       const base = edit.original_content;
       if (upstream !== null && typeof base === 'string' && upstream !== base) {
         // The reviewer edited this file AND upstream drifted from their baseline:
-        // surface all three so they can reconcile (req 5).
+        // diff their edits directly against the developer's latest (req 5). The
+        // base they started from isn't shown — once they've made the edit, what
+        // they need is what changed relative to *their own* version, not a
+        // three-way reconcile against the original.
         payload = {
-          view: 'three_way',
-          content: mine,
-          source: 'edit',
-          base,
+          view: 'two_way',
+          content: upstream,
+          source: 'github',
+          seen: mine,
+          diffSource: 'edit',
           upstream,
-          mine,
-          diff: threeWay(base, upstream, mine),
+          diff: lineDiff(mine, upstream),
         };
       } else {
         // No upstream drift (or no usable baseline) — just show their edit.
@@ -243,6 +246,7 @@ function createReviewRouter({ db, github }) {
         content: upstream,
         source: 'github',
         seen: visit.seen_content,
+        diffSource: 'seen',
         upstream,
         diff: lineDiff(visit.seen_content, upstream),
       };

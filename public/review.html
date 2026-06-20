@@ -115,44 +115,6 @@
     }
     #editor-area.reconcile #reference-panel.collapsed { width: auto; min-width: 0; }
     #reference-panel.collapsed #reference-label { display: none; }
-    .tw-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 12px; background: #f6f8fa; border-bottom: 1px solid #e1e4e8; }
-    .tw-legend .tw-key {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      font-size: 11px;
-      color: #57606a;
-      display: inline-flex;
-      align-items: center;
-    }
-    .tw-legend .tw-chip {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 16px;
-      height: 16px;
-      padding: 0 3px;
-      border-radius: 3px;
-      margin-right: 5px;
-      font-size: 10.5px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      border: 1px solid rgba(27,31,35,0.15);
-    }
-    .tw-legend .tw-key.your .tw-chip { background: #e6ffed; color: #22863a; }
-    .tw-legend .tw-key.author .tw-chip { background: #ddf4ff; color: #0969da; }
-    .tw-legend .tw-key.conflict .tw-chip { background: #ffe1b3; color: #9a6700; }
-
-    .tw-gutter {
-      flex: 0 0 30px;
-      text-align: center;
-      font-size: 10.5px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      border-right: 1px solid #eaecef;
-      border-bottom: 1px solid #f3f4f6;
-      color: #6a737d;
-      user-select: none;
-    }
-    .tw-gutter.your { background: #e6ffed; color: #22863a; }
-    .tw-gutter.author { background: #ddf4ff; color: #0969da; }
-    .tw-gutter.conflict { background: #ffe1b3; color: #9a6700; }
     #reference-header {
       display: flex;
       align-items: center;
@@ -188,37 +150,32 @@
     }
     #reference-panel.collapsed #reference-body { display: none; }
 
-    /* Two-way: the developer's changed paragraphs are highlighted in place in
-       the editor; the side panel shows the reviewer's last-seen version for
-       reference. The highlight is a positioned overlay (see
-       highlightChangedParagraphs) rather than a class on the paragraph
-       itself, since ProseMirror reconciles away classes added directly to
-       its own contentDOM nodes. */
-    .paragraph-changed-overlay {
-      position: absolute;
-      background: rgba(46, 160, 67, 0.15);
-      border-radius: 3px;
-      pointer-events: none;
-    }
-    .reference-subheading {
-      padding: 8px 12px 4px;
+    /* Two-column diff: the reviewer's prior version (left) against the
+       developer's current upstream (right). */
+    .tw-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 12px; background: #f6f8fa; border-bottom: 1px solid #e1e4e8; }
+    .tw-legend .tw-key {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
-      color: #6a737d;
+      color: #57606a;
+      display: inline-flex;
+      align-items: center;
     }
-    .reference-plain {
-      margin: 0;
-      padding: 0 12px 12px;
-      white-space: pre-wrap;
-      word-break: break-word;
+    .tw-legend .tw-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 3px;
+      border-radius: 3px;
+      margin-right: 5px;
+      font-size: 10.5px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12.5px;
-      line-height: 1.5;
+      border: 1px solid rgba(27,31,35,0.15);
     }
-
-    /* Three-way column header + rows */
+    .tw-legend .tw-key.changed .tw-chip { background: #ffe1b3; color: #9a6700; }
+    .tw-legend .tw-key.addition .tw-chip { background: #e6ffed; color: #22863a; }
+    .tw-legend .tw-key.deletion .tw-chip { background: #ffeef0; color: #cb2431; }
     #threeway-head { display: flex; border-bottom: 1px solid #e1e4e8; background: #f6f8fa; position: sticky; top: 0; }
     #threeway-head .tw-col {
       flex: 1;
@@ -232,7 +189,7 @@
     }
     #threeway-head .tw-col:last-child { border-right: none; }
     .tw-row { display: flex; }
-    .tw-row.conflict { background: #fff8e6; }
+    .tw-row.changed { background: #fff8e6; }
     .tw-cell {
       flex: 1;
       padding: 1px 12px;
@@ -243,9 +200,9 @@
     }
     .tw-cell:last-child { border-right: none; }
     .tw-cell.empty { background: #fafbfc; }
-    .tw-cell.changed { background: #e6ffed; }
-    .tw-cell.upstream { background: #ddf4ff; }
-    .tw-row.conflict .tw-cell.changed, .tw-row.conflict .tw-cell.upstream { background: #ffe1b3; }
+    .tw-cell.changed { background: #ffe1b3; }
+    .tw-cell.addition { background: #e6ffed; }
+    .tw-cell.deletion { background: #ffeef0; }
 
     #status-banner {
       display: none;
@@ -661,118 +618,47 @@
     if (el) el.classList.add('edited');
   }
 
-  // Two-way side panel: the reviewer's last-seen version, for reference
-  // alongside the now-current editor (which mounts on upstream).
-  function buildPreviousVersion(container, seenContent) {
-    const heading = document.createElement('div');
-    heading.className = 'reference-subheading';
-    heading.textContent = 'Your last-seen version';
-    container.appendChild(heading);
-    const pre = document.createElement('pre');
-    pre.className = 'reference-plain';
-    pre.textContent = seenContent || '';
-    container.appendChild(pre);
-  }
-
-  // Highlight, in place, the paragraphs the developer changed (two-way case)
-  // so the reviewer sees exactly where the file moved without a duplicate
-  // line-by-line diff. Matches by exact paragraph text against the diff's
-  // added lines, consistent with how comment re-anchoring matches paragraphs.
-  //
-  // The highlight is drawn as absolutely-positioned overlay bars in
-  // #editor-wrap rather than a class on the paragraph itself: ProseMirror's
-  // own DOM observer watches its contentDOM (.ProseMirror) and reconciles
-  // away any class we add directly to its nodes almost immediately, since
-  // that attribute isn't part of its document model. Overlaying outside that
-  // subtree sidesteps the observer entirely.
-  let changeHighlightEls = [];
-  let changeHighlightScrollTarget = null;
-  let changeHighlightReposition = null;
-
-  function clearChangeHighlights() {
-    changeHighlightEls.forEach(el => el.remove());
-    changeHighlightEls = [];
-    if (changeHighlightScrollTarget && changeHighlightReposition) {
-      changeHighlightScrollTarget.removeEventListener('scroll', changeHighlightReposition);
-      window.removeEventListener('resize', changeHighlightReposition);
+  // Pair up the flat add/del/eq rows lineDiff() emits into two-column rows.
+  // lineDiff walks a gap between matched lines by emitting all its 'add'
+  // lines before its 'del' lines (see diff.js), so within one gap we pair
+  // them index-for-index: a line on both sides at the same spot is one
+  // changed row; whichever side has more lines in that gap contributes
+  // addition- or deletion-only rows for the leftover.
+  function pairDiffRows(rows) {
+    const paired = [];
+    let adds = [], dels = [];
+    function flushGap() {
+      const n = Math.min(adds.length, dels.length);
+      for (let k = 0; k < n; k++) paired.push({ kind: 'changed', left: dels[k], right: adds[k] });
+      for (let k = n; k < dels.length; k++) paired.push({ kind: 'deletion', left: dels[k], right: null });
+      for (let k = n; k < adds.length; k++) paired.push({ kind: 'addition', left: null, right: adds[k] });
+      adds = []; dels = [];
     }
-    changeHighlightScrollTarget = null;
-    changeHighlightReposition = null;
-  }
-
-  // Returns the number of paragraphs matched and highlighted.
-  function highlightChangedParagraphs(diffRows) {
-    clearChangeHighlights();
-    const root = proseMirrorRoot();
-    if (!root || !diffRows) return 0;
-    const addedTexts = new Set(diffRows.filter(r => r.type === 'add' && r.text).map(r => r.text));
-    const matched = Array.from(root.children).filter(el => addedTexts.has(el.textContent));
-    if (!matched.length) return 0;
-
-    const wrap = document.getElementById('editor-wrap');
-    // Appended (and so painted on top of the editor's own opaque background)
-    // but translucent and pointer-events:none, so the text reads through it
-    // and clicks/selection still reach the editor underneath.
-    const bars = matched.map(() => {
-      const bar = document.createElement('div');
-      bar.className = 'paragraph-changed-overlay';
-      wrap.appendChild(bar);
-      return bar;
+    (rows || []).forEach(r => {
+      if (r.type === 'add') adds.push(r.text);
+      else if (r.type === 'del') dels.push(r.text);
+      else { flushGap(); paired.push({ kind: 'eq', left: r.text, right: r.text }); }
     });
-
-    function reposition() {
-      const wrapRect = wrap.getBoundingClientRect();
-      matched.forEach((el, i) => {
-        const r = el.getBoundingClientRect();
-        const bar = bars[i];
-        bar.style.top = (r.top - wrapRect.top + wrap.scrollTop) + 'px';
-        bar.style.left = (r.left - wrapRect.left + wrap.scrollLeft) + 'px';
-        bar.style.width = r.width + 'px';
-        bar.style.height = r.height + 'px';
-      });
-    }
-    reposition();
-
-    changeHighlightEls = bars;
-    changeHighlightScrollTarget = root;
-    changeHighlightReposition = reposition;
-    root.addEventListener('scroll', reposition);
-    window.addEventListener('resize', reposition);
-
-    return matched.length;
+    flushGap();
+    return paired;
   }
 
-  // Marker shown in each row's left gutter (GitHub-style), so the signal reads
-  // without relying on color alone. Conflicts win over single-sided changes.
-  const TW_MARKERS = {
-    conflict: { cls: 'conflict', glyph: '⚠' },
-    your: { cls: 'your', glyph: '✎' },
-    author: { cls: 'author', glyph: '</>' },
-  };
-  function rowMarker(r) {
-    if (r.conflict) return TW_MARKERS.conflict;
-    if (r.mineChanged) return TW_MARKERS.your;
-    if (r.upstreamChanged) return TW_MARKERS.author;
-    return null;
-  }
-
-  // Build the reconcile reference: a left gutter marker + two columns
-  // (Original | Your edits) the reviewer re-applies onto the upstream content
-  // shown in the editor. Color and a left marker carry the signal; a legend
-  // explains both:
-  //   ✎  green → you edited this line here
-  //   </> blue → it came from the developer's commit (the editor has the new version)
-  //   ⚠  amber → conflict: you both changed this line
-  function buildThreeWay(container, rows) {
+  // Build the two-column reference panel: left = the reviewer's prior
+  // version (their unsent edit, or their last-seen version if they hadn't
+  // edited), right = the developer's current upstream. changedWord controls
+  // whether a paired row reads as a "conflict" (there's a pending edit at
+  // stake) or a plain "changed" (no-edit case — nothing of the reviewer's
+  // is at risk, it's purely informational).
+  function buildTwoColumnDiff(container, rows, leftLabel, changedWord) {
     const legend = document.createElement('div');
     legend.className = 'tw-legend';
-    [['your', '✎', 'Your edit'], ['author', '</>', 'Developer changed it'], ['conflict', '⚠', 'Conflict (both)']]
-      .forEach(([cls, glyph, text]) => {
+    [['changed', changedWord], ['addition', 'Developer added'], ['deletion', 'Removed upstream']]
+      .forEach(([cls, text]) => {
         const key = document.createElement('span');
         key.className = 'tw-key ' + cls;
         const chip = document.createElement('span');
         chip.className = 'tw-chip';
-        chip.textContent = glyph;
+        chip.textContent = cls === 'changed' ? '⚠' : cls === 'addition' ? '+' : '−';
         key.appendChild(chip);
         key.appendChild(document.createTextNode(' ' + text));
         legend.appendChild(key);
@@ -781,10 +667,7 @@
 
     const head = document.createElement('div');
     head.id = 'threeway-head';
-    const headGutter = document.createElement('div');
-    headGutter.className = 'tw-gutter';
-    head.appendChild(headGutter);
-    ['Original', 'Your edits (re-apply)'].forEach(label => {
+    [leftLabel, "Developer's version"].forEach(label => {
       const col = document.createElement('div');
       col.className = 'tw-col';
       col.textContent = label;
@@ -792,33 +675,40 @@
     });
     container.appendChild(head);
 
-    rows.forEach(r => {
+    pairDiffRows(rows).forEach(r => {
+      if (r.kind === 'eq') {
+        const row = document.createElement('div');
+        row.className = 'tw-row';
+        [r.left, r.right].forEach(text => {
+          const c = document.createElement('div');
+          c.className = 'tw-cell';
+          c.textContent = text;
+          row.appendChild(c);
+        });
+        container.appendChild(row);
+        return;
+      }
       const row = document.createElement('div');
-      row.className = 'tw-row' + (r.conflict ? ' conflict' : '');
-      const gutter = document.createElement('div');
-      gutter.className = 'tw-gutter';
-      const mk = rowMarker(r);
-      if (mk) { gutter.classList.add(mk.cls); gutter.textContent = mk.glyph; }
-      row.appendChild(gutter);
+      row.className = 'tw-row ' + r.kind;
       const cell = (text, extraClass) => {
         const c = document.createElement('div');
         c.className = 'tw-cell' + (text === null ? ' empty' : '') + (extraClass ? ' ' + extraClass : '');
         c.textContent = text === null ? '' : text;
         return c;
       };
-      // Original cell flags an upstream change; Your-edits cell flags your change.
-      row.appendChild(cell(r.base, r.upstreamChanged ? 'upstream' : ''));
-      row.appendChild(cell(r.mine, r.mineChanged ? 'changed' : ''));
+      row.appendChild(cell(r.left, r.kind === 'changed' || r.kind === 'deletion' ? r.kind : ''));
+      row.appendChild(cell(r.right, r.kind === 'changed' || r.kind === 'addition' ? r.kind : ''));
       container.appendChild(row);
     });
   }
 
-  // Show the reference pane beside the editor: for two-way, the developer's
-  // changed paragraphs are highlighted in place in the editor (see
-  // highlightChangedParagraphs) and this panel is just the reviewer's
-  // last-seen version, for comparison. For three-way it's the Original /
-  // Your-edits reconcile the reviewer re-applies their edits from. The editor
-  // itself always mounts on upstream — the pane is reference, not a gate.
+  // Show the reference pane beside the editor: a two-column diff of the
+  // reviewer's prior version against the developer's current upstream —
+  // their unsent edit if they have one, otherwise their last-seen version.
+  // The original base isn't shown anywhere; once you've made an edit, what
+  // matters is what changed relative to *your* version, not a three-way
+  // reconcile against the original. The editor itself always mounts on
+  // upstream — the pane is reference, not a gate.
   function showReference(data) {
     const area = document.getElementById('editor-area');
     const panel = document.getElementById('reference-panel');
@@ -826,15 +716,12 @@
     const body = document.getElementById('reference-body');
     body.innerHTML = '';
     area.classList.add('reconcile');
-    if (data.view === 'three_way') {
-      label.textContent = 'This file also changed upstream while you had unsent edits. Re-apply your changes (right column) in the editor; the left marker and color show your changes, the author’s upstream changes, and conflicts (see legend).';
-      buildThreeWay(body, data.diff || []);
+    if (data.diffSource === 'edit') {
+      label.textContent = 'The developer also changed this file while you had unsent edits. Compare your edits (left) against the developer\'s version (right); the editor on the right already has their latest.';
+      buildTwoColumnDiff(body, data.diff, 'Your edits', 'Conflict');
     } else {
-      const changed = highlightChangedParagraphs(data.diff);
-      label.textContent = changed === 1
-        ? 'The developer changed this file — 1 paragraph updated, highlighted in the editor.'
-        : `The developer changed this file — ${changed} paragraphs updated, highlighted in the editor.`;
-      buildPreviousVersion(body, data.seen);
+      label.textContent = 'The developer changed this file since you last looked at it.';
+      buildTwoColumnDiff(body, data.diff, 'Your last-seen version', 'Changed');
     }
     panel.classList.remove('collapsed');
     document.getElementById('reference-toggle').textContent = 'Hide';
@@ -842,7 +729,6 @@
   }
 
   function hideReference() {
-    clearChangeHighlights();
     document.getElementById('reference-panel').style.display = 'none';
     document.getElementById('editor-area').classList.remove('reconcile');
   }
@@ -1041,10 +927,6 @@
     const wrap = document.getElementById('editor-wrap');
     wrap.style.display = 'flex';
 
-    // Overlay highlight bars live in #editor-wrap, not inside the editor's
-    // own DOM, so editor.destroy() below won't clean them up — clear them
-    // explicitly before mounting the next file's editor.
-    clearChangeHighlights();
     if (editor) editor.destroy();
 
     editor = new toastui.Editor({
@@ -1099,9 +981,9 @@
 
     document.getElementById('no-file').style.display = 'none';
 
-    // When something moved (two- or three-way), keep the comparison visible as a
+    // When something moved upstream, keep the comparison visible as a
     // reference and edit from upstream so the author's changes are never dropped.
-    const hasReference = data.view === 'two_way' || data.view === 'three_way';
+    const hasReference = data.view === 'two_way';
     const editContent = hasReference ? data.upstream : data.content;
 
     fileOriginals[filePath] = editContent;

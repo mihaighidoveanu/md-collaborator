@@ -39,9 +39,11 @@ guarantees the following behavior:
 4. **Edits commit to the current PR.** Submitting edits commits directly to the
    branch of whichever PR is currently "current" (the original PR, or its
    merged-PR fallback successor — see §2.1).
-5. **Three-way reconciliation.** When upstream moved while the reviewer had
-   unsent edits, they see a three-way view: the base they started from, the new
-   upstream content, and their own unsent edits.
+5. **Edit-vs-upstream diff.** When upstream moved while the reviewer had unsent
+   edits, they see their own unsent edits diffed directly against the
+   developer's latest upstream content. The base they started from is not part
+   of the comparison — once an edit exists, what matters is how it differs from
+   what's current now, not a reconciliation against the original.
 6. **Iterative, non-terminal review.** The session is never locked. The reviewer
    can keep editing and re-submitting; re-submissions land on the *same* current
    PR. A no-edit submission posts a formal GitHub **approval** on the current PR
@@ -79,7 +81,7 @@ resolves.
 | Current PR state | "Submit changes" does | What the reviewer sees on reopen |
 |---|---|---|
 | **Open** (original PR, first submit) | commit directly onto `head_branch` (live head) — no new branch, no new PR | their edits |
-| **Open** (current PR, later submits) | commit directly onto its branch (live head) — no new branch, no new PR | **diffs** (two-/three-way view) |
+| **Open** (current PR, later submits) | commit directly onto its branch (live head) — no new branch, no new PR | **diffs** (two-way view) |
 | **Merged or closed** | create a new branch off the **live head of that PR's own base/target branch** → commit → open a **new** PR targeting that base branch; this new PR becomes the current PR | the target branch content |
 
 Rules:
@@ -118,14 +120,15 @@ back to `session.head_sha` if that lookup fails) and decides a `view`:
 
 - **`plain`** — no prior "seen" snapshot differs and no dirty edit with drift.
   Loads the content straight into the editor; no reference pane.
-- **`two_way`** — the file changed upstream since the reviewer last looked at it.
-  Payload includes the prior seen content, the upstream content, and a
-  `lineDiff(seen, upstream)` (the browser uses the diff's added lines to find
-  and highlight the changed paragraphs in the editor — see §5.2). *(req 2)*
-- **`three_way`** — the reviewer has a dirty local edit **and** upstream differs
-  from the edit's base (`original_content`). Payload includes `{ base, upstream,
-  mine }` and a `threeWay(base, upstream, mine)` alignment with conflict rows
-  flagged. *(req 5)*
+- **`two_way`** — something needs to be diffed against the current upstream.
+  `diffSource` says which side it's diffed from:
+  - `diffSource: 'seen'` — no pending edit; the file changed upstream since the
+    reviewer last looked at it. Payload includes the prior seen content, the
+    upstream content, and `lineDiff(seen, upstream)`. *(req 2)*
+  - `diffSource: 'edit'` — the reviewer has a dirty local edit **and** upstream
+    differs from the edit's base (`original_content`, used only to detect that
+    drift happened — never displayed). Payload includes the reviewer's edit
+    (as `seen`), the upstream content, and `lineDiff(mine, upstream)`. *(req 5)*
 
 After computing the response, the **seen snapshot advances** (the upstream
 content becomes the new "seen" watermark) — but only for active sessions, so
@@ -192,27 +195,26 @@ the dirty rows.
 ### 5.2 Diff / reconciliation panes
 
 - `plain` → editor only.
-- `two_way` → no edits of the reviewer's own are pending, so this is purely
-  informational: a one-line banner states how many paragraphs the developer
-  changed, and those paragraphs are highlighted **in place** in the editor — a
-  translucent green overlay positioned over each paragraph whose text matches
-  an added line in `lineDiff(seen, upstream)`, rather than a separate
-  diff-row list. (The overlay is drawn outside the editor's own managed DOM
-  and repositioned on scroll/resize, since the editor's internal reconciler
-  reverts classes added directly to its nodes.) A collapsible reference pane
-  **beside** the editor shows the reviewer's last-seen version as plain text,
-  for comparison. Editor mounts on `upstream`.
-- `three_way` → reference pane **beside** the editor (reference left, editor
-  right) for compare-while-editing. The reference is a **2-column** view
-  **Original | Your edits** with a role-based left-gutter marker on each changed
-  row: `✎` green = you edited this line; `</>` blue = it came from the developer's
-  commit (the editor on the right has the new version); `⚠` amber = conflict, both
-  sides changed it. A legend explains the markers so the view survives grayscale /
-  colorblindness. The editor mounts on `upstream` and **editing always continues
-  from upstream** — the reviewer re-applies their own changes (left column) into
-  the editor by hand, and the result autosaves. (Rationale: committing a
-  mine-based version would revert other lines the developer changed upstream;
-  re-applying onto upstream cannot.)
+- `two_way` → a collapsible reference pane **beside** the editor (reference
+  left, editor right) shows a **2-column** diff: the reviewer's prior version
+  on the left, the developer's current upstream on the right. Rows are paired
+  by position from `lineDiff(left, upstream)`: a line present (and differing)
+  on both sides is one row marked **changed** (`diffSource: 'edit'` labels this
+  "Conflict" — there's a pending edit at stake; `diffSource: 'seen'` labels it
+  plain "Changed" — informational only, nothing of the reviewer's is at risk);
+  a line only upstream is **addition**-marked; a line only on the left is
+  **deletion**-marked. A legend explains the markers so the view survives
+  grayscale / colorblindness.
+  - `diffSource: 'seen'` — left column is "Your last-seen version" (no pending
+    edit; purely informational about what moved upstream).
+  - `diffSource: 'edit'` — left column is "Your edits." The editor mounts on
+    `upstream` and **editing always continues from upstream** — the reviewer
+    re-applies their own changes (left column) into the editor by hand, and the
+    result autosaves. (Rationale: committing a mine-based version would revert
+    other lines the developer changed upstream; re-applying onto upstream
+    cannot.) The original base they started from is never shown or computed —
+    only `mine` and `upstream` matter once an edit exists.
+  - Editor always mounts on `upstream` in both cases.
 
 The reference pane is collapsible (Hide/Show).
 
@@ -268,8 +270,10 @@ exists from session creation. *(req 2 of the re-submission spec)*
 
 **`file_edits`**:
 - `original_content` — the **base**: content the reviewer first started editing
-  from (first-write-wins via `COALESCE`); the base leg of the three-way diff.
-  Advanced to the committed content after a commit-submit.
+  from (first-write-wins via `COALESCE`). Used only to detect whether upstream
+  has drifted since (`upstream !== base`); never displayed or diffed itself —
+  the edit-vs-upstream diff (`diffSource: 'edit'`) compares `mine` directly
+  against `upstream`. Advanced to the committed content after a commit-submit.
 - `base_sha TEXT` — `session.head_sha` at first save; advanced to the new commit
   SHA after a commit-submit.
 - `dirty` — whether the row has uncommitted edits (reset to 0 after commit).
@@ -314,8 +318,8 @@ CREATE TABLE IF NOT EXISTS comments (
   review on the **current** PR; returns `{ id, html_url }`.
 
 Supporting server libs:
-- `server/lib/diff.js` — `lineDiff(oldText, newText)` and
-  `threeWay(baseText, upstreamText, mineText)`, both line-based on `lcsIndices`.
+- `server/lib/diff.js` — `lineDiff(oldText, newText)`, line-based on
+  `lcsIndices`. Used for both `diffSource` cases (`seen`/`edit`).
 - `server/lib/minimalDiff.js` — `reconstructMinimalContent(original, content)`
   turns a stored edit into the bytes to commit; `lcsIndices(a, b)`.
 
@@ -337,11 +341,11 @@ Where the two source specs disagreed, the later
 | **Baselines** | Base captured first-write-wins; not advanced. | Baselines **advance** after a successful commit-submit so the next round starts clean. |
 | **Submit destination** | `business-same-pr-resubmission.md` describes a dedicated review branch + review PR, separate from the original PR, created on first submit and reused/recreated per its own matrix. | **Overridden by direct instruction**: there is no separate review branch/PR while the original PR is open. Submits commit straight onto the original PR's own branch (`head_branch`). A new branch + PR is opened **only** as a fallback once the current PR is merged or closed (§2.1). `business-same-pr-resubmission.md` is left as-is (historical) and is now superseded on this point by this document. |
 
-United without conflict from both specs: change-aware file view (two-way),
-three-way reconciliation, comments (anchored + general, panel, re-anchoring,
-travel with the current PR), server-side line diffing, the comments table /
-`file_edits.base_sha` / `file_visits` seen-snapshot data model, and the GitHub
-adapter surface.
+United without conflict from both specs: change-aware file view (two-way,
+including the edit-vs-upstream diff), comments (anchored + general, panel,
+re-anchoring, travel with the current PR), server-side line diffing, the
+comments table / `file_edits.base_sha` / `file_visits` seen-snapshot data
+model, and the GitHub adapter surface.
 
 ---
 
@@ -362,9 +366,10 @@ adapter surface.
       no-edit submit approves rather than re-commits.
 - [ ] Reopening a file that moved upstream shows a diff **by default**; an
       unchanged file opens straight into the editor. *(req 2)*
-- [ ] A file with unsent local edits **and** upstream drift opens in a three-way
-      Original / Your-edits reconcile view with conflicts flagged; the reviewer
-      resolves and the result autosaves. *(req 5)*
+- [ ] A file with unsent local edits **and** upstream drift opens a two-column
+      diff of **Your edits | Developer's version** (no base/original shown)
+      with conflicting lines flagged; the reviewer re-applies their edits onto
+      upstream and the result autosaves. *(req 5)*
 - [ ] Hovering a paragraph reveals a comment button that anchors a comment; the
       top-right button creates a general comment; both list, resolve, delete.
       *(req 3)*
@@ -375,8 +380,8 @@ adapter surface.
       plain non-GitHub language.
 - [ ] `npm test` and `npm run test:e2e` pass; `test-spec.md` reflects the current
       semantics (REQ-9 matrix, REQ-12 removed, REQ-15/16/17 change-aware /
-      three-way / comments, REQ-18/19/20 re-submission / approve / baseline
-      advance).
+      edit-vs-upstream diff / comments, REQ-18/19/20 re-submission / approve /
+      baseline advance).
 
 ---
 

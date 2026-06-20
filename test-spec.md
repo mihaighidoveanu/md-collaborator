@@ -170,17 +170,18 @@ what changed rather than dropping them straight into the editor.
 
 ---
 
-## REQ-16 — The reviewer can reconcile their unsent edits against drifted upstream
+## REQ-16 — The reviewer can diff their unsent edits against drifted upstream
 
 When the reviewer has edited a file and the upstream content has *also* moved
-since their edit baseline, the file opens to a three-way view — original,
-upstream (author), and their own unsent edits — with clashing lines flagged so
-they can reconcile rather than silently clobber.
+since their edit baseline, the file opens to a two-way diff of their own
+unsent edits against the current upstream (author) content — the original
+baseline they started from is not shown — with differing lines flagged so they
+can reconcile rather than silently clobber.
 
 | # | Type | Lvl | Behavior |
 |---|------|-----|----------|
-| R16.1 | happy | I/E | An edited file whose upstream drifted opens a three-way view; a line both sides changed is flagged as a conflict |
-| R16.2 | edge | I | Non-overlapping edits (reviewer and author touched different lines) open three-way with no conflicts |
+| R16.1 | happy | I/E | An edited file whose upstream drifted diffs the edit directly against upstream; a line both sides changed is flagged as a conflict |
+| R16.2 | edge | I | Non-overlapping edits (reviewer and author touched different lines) still diff cleanly against upstream |
 | R16.3 | edge | I | An edited file whose upstream has not moved stays a direct (plain) view — no reconciliation needed |
 
 ---
@@ -261,7 +262,7 @@ cleaned up on failure (a branch the current PR already had is never touched).
 | R13 Revoked link | R13.1 | — | ✓ |
 | R14 Diagrams | R14.1 | ✓ | — |
 | R15 Change awareness | R15.1–R15.2 | ✓ | — |
-| R16 Three-way reconcile | R16.1–R16.3 | ✓ | ✓ |
+| R16 Edit-vs-upstream diff | R16.1–R16.3 | ✓ | ✓ |
 | R17 Comments | R17.1–R17.3 | ✓ | ✓ |
 | R18 Same-PR re-submission | R18.1–R18.3 | ✓ | ✓ |
 | R19 Approve posts GitHub review | R19.1 | — | ✓ |
