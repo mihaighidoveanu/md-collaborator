@@ -3,8 +3,13 @@
 // the codebase's diffing logic.
 const { lcsIndices } = require('./minimalDiff');
 
+// A single trailing newline is a formatting artifact (GitHub's raw content
+// has one, the editor's serialized markdown often doesn't) rather than a
+// meaningful blank line — left in, it shifts one side's line count by one
+// and misaligns the LCS pairing for every line after it, splitting a single
+// changed line into two disjoint rows (REQ: three-way reconcile correctness).
 function splitLines(text) {
-  return (text || '').replace(/\r\n/g, '\n').split('\n');
+  return (text || '').replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
 }
 
 // Inline two-way line diff. Walks the LCS pairing the same way

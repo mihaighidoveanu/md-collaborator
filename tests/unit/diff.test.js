@@ -150,3 +150,19 @@ test('threeWay: multi-line equal-length replacement pairs index-for-index', () =
   assert.equal(rows.find(r => r.base === 'b').upstream, 'X');
   assert.equal(rows.find(r => r.base === 'c').upstream, 'Y');
 });
+
+test('threeWay: a trailing newline on only one side does not misalign the last changed line', () => {
+  // GitHub's raw content ends with "\n"; the editor's serialized markdown
+  // often doesn't. Without normalizing that, "mine" has one fewer split
+  // line than base/upstream, shifting the LCS pairing and splitting the
+  // last paragraph's edit into two disjoint rows instead of one.
+  const base = 'a\nb\nold last line\n';
+  const upstream = 'a\nb\nupstream last line\n';
+  const mine = 'a\nb\nmine last line';
+  const rows = threeWay(base, upstream, mine);
+  const changedRow = rows.find(r => r.base === 'old last line');
+  assert.ok(changedRow, 'the changed base line is present as its own row');
+  assert.equal(changedRow.upstream, 'upstream last line');
+  assert.equal(changedRow.mine, 'mine last line');
+  assert.equal(changedRow.conflict, true);
+});
