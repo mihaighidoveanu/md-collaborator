@@ -728,8 +728,8 @@
     body.innerHTML = '';
     area.classList.add('reconcile');
     if (data.diffSource === 'edit') {
-      label.textContent = 'The developer also changed this file while you had unsent edits. Compare your edits (left) against the developer\'s version (right); the editor on the right already has their latest.';
-      buildTwoColumnDiff(body, data.diff, 'Your edits', 'Conflict');
+      label.textContent = 'The developer changed this file since you last looked at it. Your draft edits were overwritten. Review and apply again, if necessary.';
+      buildTwoColumnDiff(body, data.diff, 'Your last-seen version', 'Developer\'s version');
     } else {
       label.textContent = 'The developer changed this file since you last looked at it.';
       buildTwoColumnDiff(body, data.diff, 'Your last-seen version', 'Changed');
