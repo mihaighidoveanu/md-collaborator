@@ -1116,9 +1116,9 @@
     if (hasPendingEdits()) {
       btn.disabled = false;
       btn.textContent = 'Submit changes';
-    } else if (sessionData.settled) {
+    } else if (sessionData.approved_at) {
       btn.disabled = true;
-      btn.textContent = 'No pending changes';
+      btn.textContent = 'Approved ✓';
     } else {
       btn.disabled = false;
       btn.textContent = 'Approve';
@@ -1150,8 +1150,11 @@
 
   async function submit() {
     // Flush pending editor changes first so the server sees accurate dirty rows.
+    // Only flush if the open file actually has unsaved edits — saveCurrentFile()
+    // unconditionally marks the file dirty, so calling it on an untouched file
+    // would falsely flip Approve into Submit changes.
     clearTimeout(saveTimer);
-    await saveCurrentFile();
+    if (editorDirty) await saveCurrentFile();
 
     const pending = hasPendingEdits();
     const unvisited = (sessionData?.files || []).filter(f => !f.visited).map(f => f.path);
@@ -1188,13 +1191,11 @@
       const result = await api('POST', '/submit');
       if (result.action === 'approved') {
         sessionData.approved_at = Date.now();
-        sessionData.settled = true;
         showToast('Approval sent to the developers', 3000);
       } else {
         sessionData.submitted_branch = result.branch;
         sessionData.submitted_pr_number = result.pr_number;
         sessionData.submitted_pr_url = result.pr_url;
-        sessionData.settled = true;
         (sessionData.files || []).forEach(f => { f.dirty = false; });
         editorDirty = false;
         showReviewPrBanner();
