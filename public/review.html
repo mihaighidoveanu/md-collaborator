@@ -78,6 +78,10 @@
     .file-item.active { background: #f1f8ff; border-left-color: #0366d6; font-weight: 600; }
     .file-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #e1e4e8; }
     .file-item.edited .dot { background: #f9826c; }
+    .file-item .name { flex: 1; min-width: 0; }
+    .file-item .activity { font-size: 11px; flex-shrink: 0; white-space: nowrap; }
+    .file-item .activity.activity-mine { color: #2da44e; }
+    .file-item .activity.activity-upstream { color: #6a737d; }
 
     #editor-area {
       flex: 1;
@@ -599,9 +603,16 @@
       const dot = document.createElement('span');
       dot.className = 'dot';
       const name = document.createElement('span');
+      name.className = 'name';
       name.textContent = f.path;
       el.appendChild(dot);
       el.appendChild(name);
+      if (f.last_activity_at) {
+        const activity = document.createElement('span');
+        activity.className = 'activity activity-' + f.last_activity_source;
+        activity.textContent = relTime(f.last_activity_at);
+        el.appendChild(activity);
+      }
       el.addEventListener('click', () => openFile(f.path));
       list.appendChild(el);
     });
@@ -652,7 +663,7 @@
   function buildTwoColumnDiff(container, rows, leftLabel, changedWord) {
     const legend = document.createElement('div');
     legend.className = 'tw-legend';
-    [['changed', changedWord], ['addition', 'Developer added'], ['deletion', 'Removed upstream']]
+    [['changed', changedWord], ['addition', 'Developer added'], ['deletion', 'Developer removed']]
       .forEach(([cls, text]) => {
         const key = document.createElement('span');
         key.className = 'tw-key ' + cls;
@@ -1205,7 +1216,7 @@
     document.getElementById('reference-toggle').addEventListener('click', () => {
       const panel = document.getElementById('reference-panel');
       const collapsed = panel.classList.toggle('collapsed');
-      document.getElementById('reference-toggle').textContent = collapsed ? 'Show' : 'Hide';
+      document.getElementById('reference-toggle').textContent = collapsed ? 'See history' : 'Hide';
     });
 
     // Comments: general-comment button, composer, panel collapse.

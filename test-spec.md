@@ -243,6 +243,25 @@ cleaned up on failure (a branch the current PR already had is never touched).
 
 ---
 
+## REQ-21 — The reviewer can see at a glance when a file last changed
+
+Each file in the sidebar shows the more recent of two timestamps — the
+reviewer's own last saved edit, or the last time the system observed upstream
+move on that file — colored to indicate which one it is (green for the
+reviewer's own edit, gray for an upstream update). A file with neither shows
+no timestamp. The diff legend and reference-panel toggle also use consistent,
+plain-language labels ("Developer removed" alongside "Developer added"; "See
+history" instead of "Show").
+
+| # | Type | Lvl | Behavior |
+|---|------|-----|----------|
+| R21.1 | happy | I | A file with only a saved edit reports its activity source as the reviewer's own |
+| R21.2 | happy | I | A file that has only been opened (never edited) reports its activity source as upstream |
+| R21.3 | edge | I | When both an edit and an upstream visit exist, whichever is more recent wins, in either direction |
+| R21.4 | edge | I | A file never edited or opened reports no last-activity timestamp |
+
+---
+
 ## Traceability Summary
 
 | Requirement | Tests | Happy | Unhappy/Edge |
@@ -267,6 +286,7 @@ cleaned up on failure (a branch the current PR already had is never touched).
 | R18 Same-PR re-submission | R18.1–R18.3 | ✓ | ✓ |
 | R19 Approve posts GitHub review | R19.1 | — | ✓ |
 | R20 Baseline advance | R20.1–R20.2 | ✓ | ✓ |
+| R21 Last-activity timestamp | R21.1–R21.4 | ✓ | ✓ |
 
 Every requirement has at least one test; every requirement with a meaningful failure mode has a negative test; the highest-risk business logic (submission, commit integrity, conflict safety) carries its edge cases.
 

@@ -816,3 +816,68 @@ test('R17.3 comments are scoped to their session', async () => {
   assert.equal((await ctx.request('DELETE', `/review/api/${other.token}/comments/${id}`)).status, 404, 'cannot delete another session\'s comment');
 });
 
+// REQ-21 — The sidebar shows each file's most recent activity (the reviewer's
+// edit or the upstream update, whichever is later) with a source tag.
+
+test('R21.1 a file with only a saved edit reports last_activity_source "mine"', async () => {
+  active = await setup();
+  const { ctx, session } = active;
+
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  const file = meta.json.files.find(f => f.path === 'docs/intro.md');
+  assert.equal(file.last_activity_source, 'mine');
+  assert.ok(typeof file.last_activity_at === 'number' && file.last_activity_at > 0);
+});
+
+test('R21.2 a file that has only been opened (never edited) reports last_activity_source "upstream"', async () => {
+  active = await setup();
+  const { ctx, session } = active;
+
+  await ctx.request('GET', `/review/api/${session.token}/files/${filePath('docs/intro.md')}`);
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  const file = meta.json.files.find(f => f.path === 'docs/intro.md');
+  assert.equal(file.last_activity_source, 'upstream');
+  assert.ok(typeof file.last_activity_at === 'number' && file.last_activity_at > 0);
+});
+
+test('R21.3 with both an edit and a visit, the more recent of the two wins', async () => {
+  active = await setup();
+  const { ctx, session } = active;
+  const p = 'docs/intro.md';
+
+  await ctx.request('GET', `/review/api/${session.token}/files/${filePath(p)}`);
+  await ctx.request('PUT', `/review/api/${session.token}/files/${filePath(p)}`,
+    { body: { content: '# Intro\nedited\n', originalContent: '# Intro\nhello\n' } });
+
+  // Force a deterministic ordering: visit older than edit.
+  ctx.db.prepare('UPDATE file_visits SET visited_at = ? WHERE session_id = ? AND file_path = ?').run(1000, session.id, p);
+  ctx.db.prepare('UPDATE file_edits SET updated_at = ? WHERE session_id = ? AND file_path = ?').run(2000, session.id, p);
+
+  let meta = await ctx.request('GET', `/review/api/${session.token}`);
+  let file = meta.json.files.find(f => f.path === p);
+  assert.equal(file.last_activity_source, 'mine', 'the newer edit wins');
+  assert.equal(file.last_activity_at, 2000);
+
+  // Flip it: visit now newer than edit.
+  ctx.db.prepare('UPDATE file_visits SET visited_at = ? WHERE session_id = ? AND file_path = ?').run(3000, session.id, p);
+
+  meta = await ctx.request('GET', `/review/api/${session.token}`);
+  file = meta.json.files.find(f => f.path === p);
+  assert.equal(file.last_activity_source, 'upstream', 'the newer visit wins');
+  assert.equal(file.last_activity_at, 3000);
+});
+
+test('R21.4 a file never edited or opened reports no last activity', async () => {
+  active = await setup();
+  const { ctx, session } = active;
+
+  const meta = await ctx.request('GET', `/review/api/${session.token}`);
+  const file = meta.json.files.find(f => f.path === 'docs/intro.md');
+  assert.equal(file.last_activity_at, null);
+  assert.equal(file.last_activity_source, null);
+});
+

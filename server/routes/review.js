@@ -101,21 +101,39 @@ function createReviewRouter({ db, github }) {
     const { session } = req;
     try {
       const prFiles = await reviewableFiles(session);
-      const edits = db.prepare('SELECT file_path, dirty FROM file_edits WHERE session_id = ?').all(session.id);
+      const edits = db.prepare('SELECT file_path, dirty, updated_at FROM file_edits WHERE session_id = ?').all(session.id);
       const editedPaths = new Set(edits.map(r => r.file_path));
       const dirtyPaths = new Set(edits.filter(r => r.dirty).map(r => r.file_path));
-      const visitedPaths = new Set(
-        db.prepare('SELECT file_path FROM file_visits WHERE session_id = ?')
-          .all(session.id)
-          .map(r => r.file_path)
-      );
-      const files = prFiles.map(f => ({
-        path: f.filename,
-        status: f.status,
-        edited: editedPaths.has(f.filename),
-        dirty: dirtyPaths.has(f.filename),
-        visited: visitedPaths.has(f.filename),
-      }));
+      const editedAt = new Map(edits.map(r => [r.file_path, r.updated_at]));
+      const visits = db.prepare('SELECT file_path, visited_at FROM file_visits WHERE session_id = ?').all(session.id);
+      const visitedPaths = new Set(visits.map(r => r.file_path));
+      const visitedAt = new Map(visits.map(r => [r.file_path, r.visited_at]));
+
+      // Last activity, per file: whichever of (reviewer's edit, upstream visit)
+      // happened more recently, surfaced to the sidebar as a single timestamp +
+      // source so the reviewer can tell at a glance what's stale.
+      const files = prFiles.map(f => {
+        const mine = editedAt.get(f.filename);
+        const upstream = visitedAt.get(f.filename);
+        let last_activity_at = null;
+        let last_activity_source = null;
+        if (mine != null && (upstream == null || mine >= upstream)) {
+          last_activity_at = mine;
+          last_activity_source = 'mine';
+        } else if (upstream != null) {
+          last_activity_at = upstream;
+          last_activity_source = 'upstream';
+        }
+        return {
+          path: f.filename,
+          status: f.status,
+          edited: editedPaths.has(f.filename),
+          dirty: dirtyPaths.has(f.filename),
+          visited: visitedPaths.has(f.filename),
+          last_activity_at,
+          last_activity_source,
+        };
+      });
 
       const current = await resolveCurrentPr(db, github, session);
 
